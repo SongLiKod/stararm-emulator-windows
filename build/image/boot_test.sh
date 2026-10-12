@@ -2,8 +2,10 @@
 # StarARM 镜像启动冒烟测试（CI 用 TCG，无需 KVM）：
 #   按 core/qemu_manager.py build_args 契约启动 → 轮询 adb sys.boot_completed=1 → 判定成功
 # 内核 ikconfig 实证无 virtio 驱动（# CONFIG_VIRTIO_BLK/_NET/_MMIO is not set）：
-#   根盘/数据盘 = NVMe（CONFIG_BLK_DEV_NVME=y），网卡 = qemu-xhci + usb-net（CDC ECM，
-#   guest 端 cdc_ether/usbnet 在 system_dlkm），无 virtio-gpu/rng 设备（后端无驱动，忽略）。
+#   根盘/数据盘 = NVMe（CONFIG_BLK_DEV_NVME=y），根盘为只读基盘的 CoW qcow2
+#   （ext4 挂载需写超级块，readonly 盘会被 QEMU 拒写 EPERM），
+#   网卡 = qemu-xhci + usb-net（CDC ECM，guest 端 cdc_ether/usbnet 在 system_dlkm），
+#   无 virtio-gpu/rng 设备（后端无驱动，忽略）。
 # 产物: $WORK/serial.log（内核/init 日志）、$WORK/qemu.log、$WORK/boot-test-*.txt
 set -euo pipefail
 
@@ -37,6 +39,9 @@ CMDLINE=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['cmdlin
 log "cmdline: $CMDLINE"
 
 mkdir -p "$WORK"
+# root：只读基盘 + 实例 CoW qcow2（ext4 挂载需写超级块；实证 readonly 盘会被
+# QEMU 拒写 EPERM → 挂根失败）。data：独立 qcow2 → fstab /dev/nvme1n1 formattable
+qemu-img create -f qcow2 -b "$DIST/system.img" -F raw "$WORK/root.qcow2" >/dev/null
 qemu-img create -f qcow2 "$WORK/data.qcow2" 8G >/dev/null
 SERIAL="$WORK/serial.log"
 : > "$SERIAL"
@@ -46,7 +51,7 @@ SERIAL="$WORK/serial.log"
   -accel tcg,thread=multi -name stararm-ci \
   -kernel "$DIST/Image" \
   -append "$CMDLINE androidboot.serialno=stararmci01" \
-  -drive "if=none,file=$DIST/system.img,format=raw,id=hd0,readonly=on" \
+  -drive "if=none,file=$WORK/root.qcow2,format=qcow2,id=hd0" \
   -device nvme,drive=hd0,serial=stararm0 \
   -drive "if=none,file=$WORK/data.qcow2,format=qcow2,id=hd1" \
   -device nvme,drive=hd1,serial=stararm1 \

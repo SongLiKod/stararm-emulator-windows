@@ -248,10 +248,13 @@ class QemuManager:
                 self._fail(instance, reason, "")
                 return
 
-            # 磁盘覆盖层（实例数据隔离：每实例独立 qcow2 overlay）
-            overlay = Path(self._data_dir(instance.id)) / "overlay.qcow2"
+            # 磁盘：root = 实例 CoW overlay（backing=镜像基盘，rw），/data = 独立 qcow2
+            data_dir = Path(self._data_dir(instance.id))
+            overlay = data_dir / "overlay.qcow2"
+            data_disk = data_dir / "data.qcow2"
             try:
                 self._ensure_overlay(overlay, image)
+                self._ensure_data_disk(data_disk, instance.config.disk_gb)
             except Exception as exc:
                 self._fail(instance, "err_disk", str(exc)[:300])
                 return
@@ -264,7 +267,8 @@ class QemuManager:
             graphics = instance.config.graphics
             attempt = 0
             while True:
-                args = self.build_args(instance, image, accel=accel, graphics=graphics, overlay=overlay)
+                args = self.build_args(instance, image, accel=accel, graphics=graphics,
+                                       overlay=overlay, data_disk=data_disk)
                 instance.state = InstanceState.STARTING
                 self._notify(instance.id, InstanceState.STARTING, "", "")
                 log.run("log_instance_starting", id=instance.name, accel=accel, graphics=graphics)
@@ -394,6 +398,19 @@ class QemuManager:
         subprocess.run(
             [qemu_img, "create", "-f", "qcow2",
              "-o", f"backing_file={backing}", f"backing_fmt={fmt}", str(overlay)],
+            capture_output=True, text=True, timeout=120, check=True,
+            creationflags=CREATE_NO_WINDOW,
+        )
+
+    def _ensure_data_disk(self, path: Path, size_gb: int = 32) -> None:
+        """创建实例 /data 数据盘（空 qcow2，fstab.stararm 挂载时 formattable 格式化）。"""
+        if path.exists():
+            return
+        qemu_img = self.locate_qemu_img()
+        if qemu_img is None:
+            raise RuntimeError("qemu-img not found")
+        subprocess.run(
+            [qemu_img, "create", "-f", "qcow2", str(path), f"{int(size_gb)}G"],
             capture_output=True, text=True, timeout=120, check=True,
             creationflags=CREATE_NO_WINDOW,
         )
@@ -532,8 +549,13 @@ class QemuManager:
         accel: str = "whpx",
         graphics: str = "virgl",
         overlay: Optional[Path] = None,
+        data_disk: Optional[Path] = None,
     ) -> List[str]:
-        """构建 QEMU 命令行（纯函数，可单元测试）。"""
+        """构建 QEMU 命令行（纯函数，可单元测试）。
+
+        overlay = 实例根盘 CoW qcow2（backing=镜像基盘，backing_fmt=raw），
+        data_disk = /data 实例数据盘（qcow2，fstab.stararm → /dev/nvme1n1）。
+        """
         cfg: InstanceConfig = instance.config
         args: List[str] = [
             "-M", "virt",
@@ -554,22 +576,28 @@ class QemuManager:
             cmdline = f"{cmdline} androidboot.serialno={cfg.device.serial}"
         args += ["-append", cmdline]
 
-        # 磁盘：镜像只读盘 + 实例独立 qcow2 覆盖层（数据隔离）
-        # 内核 ikconfig 无 virtio 块/传输驱动（# CONFIG_VIRTIO_BLK is not set、
-        # # CONFIG_VIRTIO_MMIO is not set），改走 NVMe（CONFIG_BLK_DEV_NVME=y +
-        # CONFIG_PCI_HOST_GENERIC=y，QEMU virt 机 PCIe 挂载）
+        # 磁盘（ikconfig 无 virtio-blk → NVMe）：
+        #  root = 实例 CoW overlay（rw）。CI 实证只读基盘会在 ext4 挂载写超级块时
+        #  被 QEMU 拒写（EPERM→挂根失败），故基盘本身不挂载（保持跨实例只读隔离），
+        #  写入全部落在 overlay；/data = 第二块独立 qcow2（fstab → /dev/nvme1n1）
         index = 0
         for drive in image.manifest.drives:
-            readonly = "on" if str(drive.get("base", "")).lower() in ("1", "true", "yes") else "off"
+            is_base = str(drive.get("base", "")).lower() in ("1", "true", "yes")
+            if is_base:
+                if overlay is None:
+                    raise ValueError("base drive requires overlay (root disk must be CoW)")
+                disk_file, disk_fmt = _host_without_drive(overlay), "qcow2"
+            else:
+                disk_file = _host_without_drive(image.file_path(drive["file"]))
+                disk_fmt = drive.get("format", "raw")
             args += [
-                "-drive", f"if=none,file={_host_without_drive(image.file_path(drive['file']))},"
-                          f"format={drive.get('format', 'raw')},id=hd{index},readonly={readonly}",
+                "-drive", f"if=none,file={disk_file},format={disk_fmt},id=hd{index}",
                 "-device", f"nvme,drive=hd{index},serial=stararm{index}",
             ]
             index += 1
-        if overlay is not None:
+        if data_disk is not None:
             args += [
-                "-drive", f"if=none,file={_host_without_drive(overlay)},format=qcow2,id=hd{index}",
+                "-drive", f"if=none,file={_host_without_drive(data_disk)},format=qcow2,id=hd{index}",
                 "-device", f"nvme,drive=hd{index},serial=stararm{index}",
             ]
 

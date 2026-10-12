@@ -1,4 +1,4 @@
-"""QEMU 调度测试：命令行构建（纯函数）与启动故障分类。"""
+﻿"""QEMU 调度测试：命令行构建（纯函数）与启动故障分类。"""
 from pathlib import Path
 
 from core.instance import Instance, InstanceConfig
@@ -39,8 +39,7 @@ def make_instance(tmp_path: Path, **overrides) -> Instance:
 def test_build_args_nat_whpx_virgl_vulkan(tmp_path):
     image = make_image(tmp_path)
     inst = make_instance(tmp_path)
-    args = QemuManager.build_args(inst, image, accel="whpx",
-                                  graphics="virgl-vulkan")
+    args = QemuManager.build_args(inst, image, accel="whpx", graphics="virgl-vulkan", overlay=tmp_path / "overlay.qcow2")
     text = " ".join(args)
     # ARM64 整机仿真
     assert "-M" in args and args[args.index("-M") + 1] == "virt"
@@ -69,7 +68,7 @@ def test_build_args_nat_whpx_virgl_vulkan(tmp_path):
 def test_build_args_virgl_only(tmp_path):
     image = make_image(tmp_path)
     inst = make_instance(tmp_path)
-    args = QemuManager.build_args(inst, image, accel="whpx", graphics="virgl")
+    args = QemuManager.build_args(inst, image, accel="whpx", graphics="virgl", overlay=tmp_path / "overlay.qcow2")
     assert "virtio-gpu-gl-device" in args
     assert not any("venus" in a for a in args)
     assert "egl-headless" in args
@@ -78,8 +77,7 @@ def test_build_args_virgl_only(tmp_path):
 def test_build_args_software_graphics(tmp_path):
     image = make_image(tmp_path)
     inst = make_instance(tmp_path)
-    args = QemuManager.build_args(inst, image, accel="tcg",
-                                  graphics="software")
+    args = QemuManager.build_args(inst, image, accel="tcg", graphics="software", overlay=tmp_path / "overlay.qcow2")
     assert "virtio-gpu-device" in args
     assert "egl-headless" not in args
     assert args[args.index("-accel") + 1] == "tcg,thread=multi"
@@ -89,8 +87,7 @@ def test_build_args_bridge_network_uses_tap_and_mgmt_net(tmp_path):
     image = make_image(tmp_path)
     inst = make_instance(tmp_path, network_mode="bridge",
                          bridge_adapter="tap-star")
-    args = QemuManager.build_args(inst, image, accel="whpx",
-                                  graphics="software")
+    args = QemuManager.build_args(inst, image, accel="whpx", graphics="software", overlay=tmp_path / "overlay.qcow2")
     text = " ".join(args)
     assert "tap,id=net0,ifname=tap-star" in text
     # 桥接模式仍保留 ADB 管理通道（用户网络 hostfwd）
@@ -102,13 +99,26 @@ def test_build_args_overlay_drive(tmp_path):
     image = make_image(tmp_path)
     inst = make_instance(tmp_path)
     overlay = tmp_path / "overlay.qcow2"
+    data_disk = tmp_path / "data.qcow2"
     args = QemuManager.build_args(inst, image, accel="whpx",
-                                  graphics="software", overlay=overlay)
+                                  graphics="software", overlay=overlay,
+                                  data_disk=data_disk)
     text = " ".join(args)
+    # root = 实例 CoW overlay（hd0），/data = 独立 qcow2（hd1），均为 NVMe
     assert str(overlay) in text and "format=qcow2" in text
-    # 只读系统盘 + 实例覆盖盘（内核无 virtio-blk → NVMe 双盘）
-    assert "readonly=on" in text
+    assert str(data_disk) in text
     assert "nvme,drive=hd0" in text and "nvme,drive=hd1" in text
+    # 基盘不挂载（ext4 挂载需写超级块，readonly 盘会被 QEMU 拒写 EPERM）
+    assert "readonly" not in text
+    assert str(image.file_path("system.img")) not in text
+
+
+def test_build_args_base_drive_requires_overlay(tmp_path):
+    image = make_image(tmp_path)
+    inst = make_instance(tmp_path)
+    import pytest
+    with pytest.raises(ValueError):
+        QemuManager.build_args(inst, image, accel="whpx", graphics="software")
 
 
 def test_classify_qemu_error():

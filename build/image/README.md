@@ -45,8 +45,10 @@ Actions → **build-image** → `Run workflow`：
   内核为 CF 同款 GKI（ikconfig 实证：**无任何 virtio 驱动**，有 NVMe/xhci/ext4/erofs）；
 - `cmdline`：`root=/dev/nvme0n1 rootwait`、`androidboot.hardware=stararm`、`androidboot.selinux=permissive`
   （组装镜像未重签 verity/AVB，必须 permissive + 解锁状态；`rootwait` 等 NVMe PCIe 异步探测）；
-- **nvme0n1** = 只读根分区（`system.img`），**nvme1n1** = 实例 qcow2 覆盖层 → 由
-  `fstab.stararm` 挂载为 `/data`，`formattable` 首启自动格式化；
+- **nvme0n1** = 根分区（**只读基盘 `system.img` 的实例 CoW qcow2**，可写；CI 实证
+  只读盘挂载时 ext4 写超级块会被 QEMU 拒写 EPERM，基盘本身永不挂载→跨实例隔离），
+  **nvme1n1** = 实例 qcow2 数据盘（`fstab.stararm` 挂载为 `/data`，`formattable`
+  首启自动格式化）；
 - 网卡 = `qemu-xhci` + `usb-net`（CDC ECM/RNDIS，guest 端 `cdc_ether`/`usbnet` 模块在
   system_dlkm）；ADB 管理通道始终走用户网络 `hostfwd`；
 - adbd 监听 TCP 5555（`service.adb.tcp.port` 已写入 `system/build.prop`）。

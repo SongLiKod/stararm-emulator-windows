@@ -1,6 +1,6 @@
 """多实例多开管理：新建、克隆、复制、批量启停、独立资源配置、镜像导入导出、实例数据隔离。
 
-实例数据独立存储：instances/<id>/（instance.json + overlay.qcow2 + qemu.pid + serial.log）
+实例数据独立存储：instances/<id>/（instance.json + overlay.qcow2 + data.qcow2 + qemu.pid + serial.log）
 支持一键克隆（含磁盘覆盖层完整拷贝）、备份（导出 zip）、还原（导入 zip）。
 """
 import copy
@@ -157,7 +157,7 @@ class InstanceManager:
         dst = paths.instance_dir(inst.id)
         dst.mkdir(parents=True, exist_ok=True)
         self.save(inst)
-        for item in ("overlay.qcow2", "serial.log"):
+        for item in ("overlay.qcow2", "data.qcow2", "serial.log"):
             f = paths.instance_dir(src.id) / item
             if f.is_file():
                 shutil.copy2(f, dst / item)
