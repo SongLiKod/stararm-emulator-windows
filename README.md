@@ -150,3 +150,16 @@ QEMU 侧：`-chardev socket,...,host=127.0.0.1,port=<agent_port>,server=on,wait=
 1. **test**（push/PR）：安装依赖并运行 `pytest`；
 2. **windows**：`build/package.ps1 -WithQemu -WithAdb` 打包并上传 artifact；
 3. **release**：推送 `v*` tag 或手动指定 version 时，创建 GitHub Release 并附带安装包。
+
+### 镜像构建（build-image）
+
+仓库不内置镜像包（内置源 404 属预期），镜像由
+`.github/workflows/build-image.yml` 手动触发组装（不做完整 AOSP 编译）：
+
+1. `build/image/fetch.py` 从 ci.android.com 下载现成 AOSP 构建产物（断点续传）；
+2. `build/image/assemble.sh` 拆 `super.img`、合并 ramdisk 为单根分区镜像；
+3. `build/image/mkimage.py` 生成 `image.json` 并打包（≤1.9GB 发布门禁）；
+4. `build/image/boot_test.sh` 用 TCG 启动冒烟（adb 验证 `sys.boot_completed`）。
+
+详见 `build/image/README.md`；可选发布到 GitHub Release（tag `images`）与
+HuggingFace 数据集（secrets `HF_TOKEN`）。

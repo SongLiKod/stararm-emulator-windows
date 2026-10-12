@@ -1,0 +1,155 @@
+name: build-image
+
+# 从 ci.android.com 下载现成 AOSP 构建产物并组装 StarARM 根分区镜像（不做完整 AOSP 编译）。
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "ci.android.com 分支（留空则必须给 build_id）"
+        required: false
+        default: "aosp-android14-gsi"
+        type: string
+      target:
+        description: "构建 target（须为完整设备构建）"
+        required: false
+        default: "aosp_cf_arm64_phone-userdebug"
+        type: string
+      build_id:
+        description: "build id（留空取分支最近成功构建）"
+        required: false
+        default: ""
+        type: string
+      image_id:
+        description: "镜像 id（zip 文件名）"
+        required: false
+        default: "aosp-14-arm64"
+        type: string
+      android_version:
+        description: "Android 版本号（写入 image.json）"
+        required: false
+        default: "14"
+        type: string
+      image_name:
+        description: "镜像显示名"
+        required: false
+        default: "AOSP 14 (ARM64)"
+        type: string
+      prune:
+        description: "裁剪路径（相对根目录，空格分隔，如 system/media system/framework/arm）"
+        required: false
+        default: ""
+        type: string
+      max_gb:
+        description: "zip 发布门禁(GB)，0 关闭"
+        required: false
+        default: "1.9"
+        type: string
+      boot_test:
+        description: "TCG 启动冒烟（约 10-30 分钟）"
+        required: false
+        default: true
+        type: boolean
+      publish_release:
+        description: "上传到 GitHub Release（tag: images）"
+        required: false
+        default: false
+        type: boolean
+      publish_hf:
+        description: "上传到 HuggingFace 数据集（需 secrets.HF_TOKEN）"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      BRANCH: ${{ inputs.branch }}
+      TARGET: ${{ inputs.target }}
+      BUILD_ID: ${{ inputs.build_id }}
+      IMAGE_ID: ${{ inputs.image_id }}
+      IMAGE_NAME: ${{ inputs.image_name }}
+      ANDROID_VERSION: ${{ inputs.android_version }}
+      PRUNE: ${{ inputs.prune }}
+      MAX_GB: ${{ inputs.max_gb }}
+      BOOT_TEST: ${{ inputs.boot_test && '1' || '0' }}
+      WORK: .work
+      OUT: dist
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 释放磁盘空间（镜像解包需要 ~15GB）
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet \
+            /usr/local/share/powershell /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-arm qemu-utils adb e2fsprogs cpio unzip zstd file rsync
+
+      - name: 校验数据源可达
+        run: python3 build/image/fetch.py --branch "$BRANCH" --target "$TARGET" --list | head -n 20
+
+      - name: 组装镜像
+        run: bash build/image/build.sh
+
+      - name: 收集日志
+        if: always()
+        run: |
+          mkdir -p logs
+          cp -f .work/serial.log logs/ 2>/dev/null || true
+          cp -f .work/qemu.log logs/ 2>/dev/null || true
+          cp -f .work/boot-fingerprint.txt logs/ 2>/dev/null || true
+          df -h > logs/df.txt || true
+
+      - name: 上传日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-logs-${{ inputs.image_id }}
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: 上传镜像包
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.image_id }}
+          path: dist/${{ inputs.image_id }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: "发布到 GitHub Release (tag: images)"
+        if: success() && inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          zip="dist/${IMAGE_ID}.zip"
+          bytes=$(stat -c%s "$zip")
+          if [ "$bytes" -gt 2147483648 ]; then
+            echo "超过 2GiB，无法放入 Release：$bytes 字节" >&2; exit 1
+          fi
+          if ! gh release view images --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create images --repo "$GITHUB_REPOSITORY" \
+              --title "内置镜像" --notes "StarARM 内置 Android 镜像（由 CI 组装）"
+          fi
+          gh release upload images "$zip" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: 发布到 HuggingFace（需 secrets.HF_TOKEN）
+        if: success() && inputs.publish_hf
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -e
+          if [ -z "$HF_TOKEN" ]; then echo "缺少 secrets.HF_TOKEN，跳过上传"; exit 0; fi
+          python3 -m pip install --quiet huggingface_hub
+          python3 build/upload_hf.py "dist/${IMAGE_ID}.zip"
