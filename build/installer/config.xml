@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Installer>
+    <Name>StarARM Emulator</Name>
+    <Version>1.0.0</Version>
+    <Title>星模ARM原生安卓模拟器</Title>
+    <Publisher>StarARM</Publisher>
+    <StartMenuDir>StarARM</StartMenuDir>
+    <TargetDir>@ApplicationsDir@/StarARM</TargetDir>
+    <RemoveTargetDir>true</RemoveTargetDir>
+</Installer>
