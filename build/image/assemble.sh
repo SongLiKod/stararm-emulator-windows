@@ -174,6 +174,15 @@ for dest in "$STAGING/fstab.stararm" "$STAGING/system/etc/fstab.stararm"; do
     > "$dest"
 done
 
+# apexd-bootstrap 同模块名去重（CI serial 实证：/vendor/apex 下 camera HAL 两个变体
+# 同模块名 com.google.emulated.camera.provider.hal → apexd SIGABRT → bootstrap-apexd-failed）
+# 扫描顺序 system→system_ext→product→vendor，仅此一对重复（前三段均通过）
+DUP_APEX="$STAGING/vendor/apex/com.google.emulated.camera.provider.hal.fastscenecycle.apex"
+if [ -f "$DUP_APEX" ]; then
+  log "去除重复模块名 apex（保留默认 camera HAL 变体）: $(basename "$DUP_APEX")"
+  rm -f "$DUP_APEX"
+fi
+
 log "写入属性（adbd TCP 5555）"
 BP="$STAGING/system/build.prop"
 [ -f "$BP" ] || BP="$STAGING/build.prop"
