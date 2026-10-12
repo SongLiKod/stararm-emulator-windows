@@ -10,6 +10,9 @@ OUT="${OUT:-dist}"
 IMG_ZIP="${IMG_ZIP:-}"
 OTATOOLS_ZIP="${OTATOOLS_ZIP:-}"
 PRUNE="${PRUNE:-}"
+# 相对路径必须转绝对：PATH 中的相对项（.work/otatools/bin）在子 shell 的 cd 之后会失效。
+# 实测（run 38279546089）：lz4 -t 在仓库根执行成功，(cd ... && lz4 -dc) 报 No such file or directory。
+case "$WORK" in /*) : ;; *) WORK="$PWD/$WORK" ;; esac
 STAGING="$WORK/staging"
 TOOLBIN="$WORK/otatools/bin"
 
@@ -25,6 +28,13 @@ if [ "$(id -u)" != "0" ]; then
   sudo -n true 2>/dev/null || die "需要免密 sudo"
   exec sudo -E env WORK="$WORK" OUT="$OUT" IMG_ZIP="$IMG_ZIP" \
     OTATOOLS_ZIP="$OTATOOLS_ZIP" PRUNE="$PRUNE" bash "$0" "$@"
+fi
+
+# 以 root 产生的文件在退出时（成功或失败）交还调用用户，
+# 否则 build.sh 后续 rm/打包/产物收集会报 Permission denied（run 38279546089 实测）。
+if [ -n "${SUDO_USER:-}" ]; then
+  handback() { chown -R "$SUDO_USER" "$WORK" "$OUT" 2>/dev/null || true; }
+  trap handback EXIT
 fi
 
 rm -rf "$WORK/images" "$WORK/parts" "$WORK/mnt" "$STAGING"
@@ -118,17 +128,20 @@ extract_ramdisk() { # boot_img outdir → 打印解包目录
   [ -n "$rd" ] || die "$img 未找到 ramdisk（输出: $(ls "$out" | tr '\n' ' ')）"
   local tmp="$out/rd"; rm -rf "$tmp"; mkdir -p "$tmp"
   # super_misc_info.txt: lz4_ramdisks=true → ramdisk 可能为 lz4；同时兜底 gzip/zstd/裸 cpio
+  # 注意：本函数在 $( ) 中调用，set -e 在命令替换里不生效（实测），
+  # 解压分支必须显式 `|| die`，并校验结果非空，否则失败会被静默吞掉。
   if gzip -t "$rd" 2>/dev/null; then
-    (cd "$tmp" && gzip -dc "$rd" | cpio -idmu --quiet)
+    (cd "$tmp" && gzip -dc "$rd" | cpio -idmu --quiet) || die "$img: gzip ramdisk 解压失败"
   elif zstd -t "$rd" 2>/dev/null; then
-    (cd "$tmp" && zstd -dc "$rd" | cpio -idmu --quiet)
+    (cd "$tmp" && zstd -dc "$rd" | cpio -idmu --quiet) || die "$img: zstd ramdisk 解压失败"
   elif command -v lz4 >/dev/null && lz4 -t "$rd" >/dev/null 2>&1; then
-    (cd "$tmp" && lz4 -dc "$rd" | cpio -idmu --quiet)
+    (cd "$tmp" && lz4 -dc "$rd" | cpio -idmu --quiet) || die "$img: lz4 ramdisk 解压失败"
   elif [ "$(head -c 5 "$rd")" = "07070" ]; then
-    (cd "$tmp" && cpio -idmu --quiet < "$rd")
+    (cd "$tmp" && cpio -idmu --quiet < "$rd") || die "$img: 裸 cpio ramdisk 解压失败"
   else
     die "$img: ramdisk 压缩格式无法识别（前4字节: $(od -A n -t x1 -N 4 "$rd" | tr -d ' ')）"
   fi
+  [ -n "$(ls -A "$tmp" 2>/dev/null)" ] || die "$img: ramdisk 解压结果为空"
   echo "$tmp"
 }
 
@@ -218,8 +231,4 @@ mkuserimg_mke2fs "$STAGING" "$OUT/system.img" ext4 / "$SIZE" \
   || die "mkuserimg_mke2fs 失败"
 log "system.img: $(du -h "$OUT/system.img" | cut -f1)"
 
-# sudo 重入时把产物交还给调用用户，便于后续步骤写入
-if [ -n "${SUDO_USER:-}" ]; then
-  chown -R "$SUDO_USER" "$OUT" || true
-fi
 log "完成: $OUT/{Image,system.img}"
