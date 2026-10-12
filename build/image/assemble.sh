@@ -55,14 +55,32 @@ if ! simg2img "$WORK/images/super.img" "$WORK/super.raw" 2>/dev/null; then
 fi
 lpunpack "$WORK/super.raw" "$WORK/parts" || die "lpunpack 失败"
 rm -f "$WORK/super.raw" "$WORK/images/super.img"
+log "lpunpack 输出:"
+ls -la "$WORK/parts" | sed 's/^/    /' || true
+[ -n "$(ls -A "$WORK/parts" 2>/dev/null)" ] || die "lpunpack 未产出任何分区文件"
 
-# ---- 3. 各逻辑分区 → 合并根（自动识别是否带 <name>/ 前缀布局）----
+# ---- 3. 各逻辑分区 → 合并根 ----
+# 依据（本构建 build 16571446 实测）：
+#   * super_empty.img LP 元数据：分区名为 system_a/vendor_a/...（ab_update=true，A/B 槽位）
+#   * lpunpack.cc:259 输出 = output_dir/ + GetPartitionName() + ".img"
+#   * super_misc_info.txt：*_fs_type=erofs、*_disable_sparse=true（super 内为裸 erofs）
+#   * _b 槽位 0 extents → lpunpack 产出 0 字节文件，不得选用
+find_part() { # part_name → 打印实际文件路径（无则失败）
+  local n="$1" f
+  for f in "${n}_a.img" "${n}.img" "${n}" "${n}_a"; do
+    if [ -f "$WORK/parts/$f" ] && [ -s "$WORK/parts/$f" ]; then
+      echo "$WORK/parts/$f"; return 0
+    fi
+  done
+  return 1
+}
+
 mount_copy() { # part_name
-  local name="$1" raw="$WORK/parts/$1.img" mnt="$WORK/mnt" sparse="$WORK/parts/$1.sparse"
-  [ -f "$raw" ] || return 0
+  local name="$1" raw sparse="$WORK/parts/$1.simg" mnt="$WORK/mnt"
+  raw=$(find_part "$name") || { log "  $name: 跳过（super 中无非空分区文件）"; return 0; }
+  log "  $name ← $(basename "$raw") ($(du -h "$raw" | cut -f1))"
   rm -f "$sparse"
   simg2img "$raw" "$sparse" 2>/dev/null || cp "$raw" "$sparse"
-  rm -f "$raw"
   rm -rf "$mnt"; mkdir -p "$mnt"
   mount -o ro,loop "$sparse" "$mnt"
   rm -f "$sparse"
@@ -76,11 +94,19 @@ mount_copy() { # part_name
   fi
   umount "$mnt"
   rm -rf "$mnt"
+  rm -f "$raw"   # 已并入 staging，释放空间
 }
+
+# 本构建分区为 erofs（super_misc_info.txt: *_fs_type=erofs），确保内核模块就绪
+modprobe erofs 2>/dev/null || true
+grep -qw erofs /proc/filesystems && log "内核支持 erofs" \
+  || log "警告: 内核未见 erofs（挂载可能失败，关注下方 mount 报错）"
 
 for part in system system_ext vendor product odm system_dlkm vendor_dlkm odm_dlkm; do
   mount_copy "$part"
 done
+[ -d "$STAGING/system" ] || die "合并根缺少 /system（检查上方 lpunpack 输出与挂载日志）"
+log "staging 根目录: $(ls "$STAGING" | tr '\n' ' ')"
 
 # ---- 4. ramdisk(init_boot 通用 + vendor_boot 厂商) 合入根 ----
 extract_ramdisk() { # boot_img outdir → 打印解包目录
@@ -91,12 +117,17 @@ extract_ramdisk() { # boot_img outdir → 打印解包目录
   rd=$(find "$out" -maxdepth 2 -name '*ramdisk*' -type f | head -n1 || true)
   [ -n "$rd" ] || die "$img 未找到 ramdisk（输出: $(ls "$out" | tr '\n' ' ')）"
   local tmp="$out/rd"; rm -rf "$tmp"; mkdir -p "$tmp"
+  # super_misc_info.txt: lz4_ramdisks=true → ramdisk 可能为 lz4；同时兜底 gzip/zstd/裸 cpio
   if gzip -t "$rd" 2>/dev/null; then
     (cd "$tmp" && gzip -dc "$rd" | cpio -idmu --quiet)
   elif zstd -t "$rd" 2>/dev/null; then
     (cd "$tmp" && zstd -dc "$rd" | cpio -idmu --quiet)
-  else
+  elif command -v lz4 >/dev/null && lz4 -t "$rd" >/dev/null 2>&1; then
+    (cd "$tmp" && lz4 -dc "$rd" | cpio -idmu --quiet)
+  elif [ "$(head -c 5 "$rd")" = "07070" ]; then
     (cd "$tmp" && cpio -idmu --quiet < "$rd")
+  else
+    die "$img: ramdisk 压缩格式无法识别（前4字节: $(od -A n -t x1 -N 4 "$rd" | tr -d ' ')）"
   fi
   echo "$tmp"
 }
@@ -106,7 +137,7 @@ RD_SYS=$(extract_ramdisk "$WORK/images/init_boot.img" "$WORK/rd_init")
 rsync -a --ignore-existing "$RD_SYS/" "$STAGING/"
 
 log "合入 vendor_boot ramdisk"
-if find "$WORK/images/vendor_boot.img" -size +0c | grep -q .; then
+if [ -s "$WORK/images/vendor_boot.img" ]; then
   RD_VND=$(extract_ramdisk "$WORK/images/vendor_boot.img" "$WORK/rd_vendor" || true)
   if [ -n "${RD_VND:-}" ] && [ -d "$RD_VND" ]; then
     rsync -a --ignore-existing "$RD_VND/" "$STAGING/"
@@ -132,11 +163,13 @@ done
 
 log "写入属性（adbd TCP 5555）"
 BP="$STAGING/system/build.prop"
+[ -f "$BP" ] || BP="$STAGING/build.prop"
 if [ -f "$BP" ]; then
+  log "  $BP"
   grep -q '^service.adb.tcp.port=' "$BP" 2>/dev/null \
     || printf 'service.adb.tcp.port=5555\npersist.service.adb.tcp.port=5555\n' >> "$BP"
 else
-  log "  警告: 未找到 system/build.prop"
+  log "  警告: 未找到 build.prop"
 fi
 
 if [ -n "$PRUNE" ]; then
@@ -153,10 +186,28 @@ mkdir -p "$STAGING/data"
 log "汇总 file_contexts"
 FC="$WORK/combined_file_contexts"
 : > "$FC"
+# 只汇总文本 file_contexts；本构建 *_selinux_fc 指向 file_contexts.bin（二进制，混入会损坏规则）
 while IFS= read -r f; do
   cat "$f" >> "$FC" || true
-done < <(find "$STAGING" -path '*/selinux/*file_contexts*' -type f 2>/dev/null | sort)
+done < <(find "$STAGING" -path '*/selinux/*file_contexts*' -type f ! -name '*.bin' 2>/dev/null | sort)
 [ -s "$FC" ] || log "  警告: 未找到 file_contexts（将以默认标签写入）"
+
+# 组装根新增/改名的路径可能不在原 file_contexts 中；e2fsdroid 查不到标签会直接失败，
+# 按需补齐（同正则已存在则跳过，避免重复规则），最后加兜底规则。
+add_fc() { # regex context —— 用 ENVIRON 传参避免 awk -v 处理反斜杠转义
+  if ! FC_R="$1" awk 'BEGIN{r=ENVIRON["FC_R"]; f=1} $1==r{f=0} END{exit f}' "$FC"; then
+    printf '%s %s\n' "$1" "$2" >> "$FC"
+    echo "    + $1 $2"
+  fi
+}
+add_fc '/'                      'u:object_r:rootfs:s0'
+add_fc '/data'                  'u:object_r:system_data_file:s0'
+add_fc '/fstab\\..*'            'u:object_r:rootfs:s0'
+add_fc '/system/etc/fstab\\..*' 'u:object_r:system_file:s0'
+add_fc '/init'                  'u:object_r:init_exec:s0'
+add_fc '/init\\..*'             'u:object_r:init_exec:s0'
+add_fc '.*'                     'u:object_r:system_file:s0'
+echo "[assemble]   file_contexts 规则数: $(grep -c '' "$FC")"
 
 BYTES=$(du -sb "$STAGING" | cut -f1)
 SIZE=$((BYTES + BYTES / 5 + 536870912))

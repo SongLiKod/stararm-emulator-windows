@@ -92,7 +92,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            qemu-system-arm qemu-utils adb e2fsprogs cpio unzip zstd file rsync
+            qemu-system-arm qemu-utils adb e2fsprogs cpio unzip zstd lz4 file rsync
 
       - name: 校验数据源可达
         run: python3 build/image/fetch.py --branch "$BRANCH" --target "$TARGET" --list | head -n 20
