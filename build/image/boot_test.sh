@@ -18,6 +18,10 @@ ADB_PORT="${ADB_PORT:-5555}"
 QEMU="${QEMU:-qemu-system-aarch64}"
 ADB="${ADB:-adb}"
 
+# qemu-img -b 的相对 backing 路径按新 qcow2 所在目录解析 → DIST 须为绝对路径
+case "$DIST" in /*) : ;; *) DIST="$PWD/$DIST" ;; esac
+case "$WORK" in /*) : ;; *) WORK="$PWD/$WORK" ;; esac
+
 log() { echo "[boot-test] $*"; }
 fail() {
   echo "[boot-test] FAIL: $*" >&2
