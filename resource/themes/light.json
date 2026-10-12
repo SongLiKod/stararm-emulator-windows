@@ -4,5 +4,9 @@
   "text": "#1D2129",
   "text_secondary": "#86909C",
   "border": "#E5E6EB",
-  "hover": "#E8F3FF"
+  "hover": "#E8F3FF",
+  "primary_hover": "#4096FF",
+  "primary_pressed": "#0958D9",
+  "success_text": "#0E9384",
+  "warning_text": "#D46B08"
 }

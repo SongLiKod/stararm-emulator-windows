@@ -4,7 +4,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
-from gui.i18n import bind, tr
+from gui.i18n import bind, rebind, tr
 
 # 警示色（品牌核心色，主题通用）
 WARNING_COLOR = "#FF7D00"
@@ -20,8 +20,12 @@ class WarningBanner(QWidget):
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("banner")
+        # 纯 QWidget 需要该属性，QSS 背景色才生效
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._text_key = text_key
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(16, 10, 12, 10)
+        layout.setSpacing(10)
 
         self._icon = QLabel("⚠")
         self._icon.setStyleSheet(f"color: {WARNING_COLOR}; font-size: 16px;")
@@ -39,7 +43,8 @@ class WarningBanner(QWidget):
         self._action.clicked.connect(self.action_requested.emit)
 
         self._close = QPushButton("×")
-        self._close.setFixedSize(24, 24)
+        self._close.setObjectName("banner_close")
+        self._close.setFixedSize(26, 26)
         self._close.setCursor(Qt.CursorShape.PointingHandCursor)
         self._close.clicked.connect(self._on_close)
 
@@ -51,3 +56,10 @@ class WarningBanner(QWidget):
     def _on_close(self) -> None:
         self.hide()
         self.closed.emit()
+
+    def set_text_key(self, key: str) -> None:
+        """按检测结论切换横幅文案（同一控件复用不同词条）。"""
+        if getattr(self, "_text_key", None) == key:
+            return
+        self._text_key = key
+        rebind(self._label, key)

@@ -1,19 +1,23 @@
-"""主窗口：实例列表与状态展示、批量操作、拖拽 APK 安装、日志面板、
-虚拟化状态检查（未开启时中文教程引导）、启动故障中文提示。"""
+"""主窗口：实例列表与状态展示、批量操作、APK 安装（工具栏 / 拖拽 / 行菜单）、
+新手欢迎与使用教程、日志面板、虚拟化状态检查（按结论分中文教程引导）、
+启动故障中文提示。"""
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox,
+    QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
     QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QSplitter, QTableWidget, QTableWidgetItem, QToolBar, QVBoxLayout, QWidget,
+    QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem, QToolBar,
+    QVBoxLayout, QWidget,
 )
 
 from core.instance import Instance, InstanceState
+from core.virtualization import REASON_FIRMWARE, REASON_WHPX
 from gui.dialogs import (
     CreateInstanceDialog, GlobalSettingsDialog, InstanceSettingsDialog,
-    KeymapEditorDialog, MacroEditorDialog, VirtualizationGuideDialog,
+    KeymapEditorDialog, MacroEditorDialog, QuickStartDialog,
+    VirtualizationGuideDialog,
 )
 from gui.display_window import DisplayWindow
 from gui.i18n import RETRANSLATOR, bind, tr
@@ -85,21 +89,29 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
 
         self._banner = WarningBanner("vt_banner_text", "btn_open_guide")
         self._banner.action_requested.connect(self._open_vt_guide)
         self._banner.hide()
         root.addWidget(self._banner)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
         self._table = QTableWidget(0, len(COLS))
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.verticalHeader().setVisible(False)
+        self._table.setShowGrid(False)
+        self._table.setObjectName("instance_table")
         self._log_panel = LogPanel()
-        splitter.addWidget(self._table)
+
+        # 空列表 -> 新手欢迎页（三步上手 + 快捷按钮）
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._table)
+        self._stack.addWidget(self._build_welcome())
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self._stack)
         splitter.addWidget(self._log_panel)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
@@ -125,7 +137,16 @@ class MainWindow(QMainWindow):
         self._theme.theme_changed.connect(lambda _t: None)
 
         self._set_table_headers()
+        self._init_columns()
         self._startup_check()
+
+    def _init_columns(self) -> None:
+        """列宽与行高：操作列拉伸、行高容纳行内按钮（启动/显示/更多）。"""
+        header = self._table.horizontalHeader()
+        header.setStretchLastSection(True)
+        for column, width in enumerate((170, 110, 80, 95, 95, 120, 150)):
+            self._table.setColumnWidth(column, width)
+        self._table.verticalHeader().setDefaultSectionSize(46)
 
     # ================================================================ menu
     def _build_menu(self) -> None:
@@ -197,6 +218,9 @@ class MainWindow(QMainWindow):
 
         help_menu = menubar.addMenu(tr("menu_help"))
         self._menus["menu_help"] = help_menu
+        self._act_quick_start = QAction(tr("act_quick_start"), self)
+        self._act_quick_start.triggered.connect(self._open_quick_start)
+        help_menu.addAction(self._act_quick_start)
         self._act_about = QAction(tr("act_about"), self)
         self._act_about.triggered.connect(self._about)
         help_menu.addAction(self._act_about)
@@ -211,6 +235,7 @@ class MainWindow(QMainWindow):
             (self._act_global, "act_global_settings"),
             (self._act_instance, "act_instance_settings"),
             (self._act_guide, "act_vt_guide"),
+            (self._act_quick_start, "act_quick_start"),
             (self._act_about, "act_about"),
         ):
             bind(widget, key)
@@ -239,6 +264,7 @@ class MainWindow(QMainWindow):
             return btn
 
         add("btn_new_instance", self._create_instance, primary=True)
+        add("btn_install_apk", self._install_apk)
         add("btn_batch_start", self._batch_start)
         add("btn_batch_stop", self._batch_stop)
         add("btn_batch_delete", self._batch_delete, danger=True)
@@ -247,17 +273,115 @@ class MainWindow(QMainWindow):
         add("btn_import_instance", self._import_instance)
         add("btn_import_image", self._import_image)
         bar.addSeparator()
+        add("btn_quick_start", self._open_quick_start)
         add("btn_refresh", self._tick)
 
     # ================================================================ status bar
     def _build_status(self) -> None:
         self._vt_btn = QPushButton()
         self._vt_btn.setFlat(True)
+        self._vt_btn.setObjectName("vt_status")
         self._vt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._vt_btn.clicked.connect(self._open_vt_guide)
         self.statusBar().addWidget(self._vt_btn)
         self._summary_label = QLabel("")
         self.statusBar().addPermanentWidget(self._summary_label)
+
+    # ================================================================ welcome
+    def _build_welcome(self) -> QWidget:
+        """空列表欢迎页：说明这是安卓模拟器 + 三步上手 + 快捷入口。"""
+        page = QWidget()
+        page.setObjectName("welcome")
+        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(48, 56, 48, 40)
+        layout.setSpacing(14)
+
+        title = QLabel()
+        title.setObjectName("welcome_title")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bind(title, "welcome_title")
+        layout.addWidget(title)
+
+        desc = QLabel()
+        desc.setObjectName("welcome_desc")
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bind(desc, "welcome_desc")
+        layout.addWidget(desc)
+
+        cards = QHBoxLayout()
+        cards.setSpacing(12)
+        for index, keys in enumerate(
+                (("welcome_step1_title", "welcome_step1_desc"),
+                 ("welcome_step2_title", "welcome_step2_desc"),
+                 ("welcome_step3_title", "welcome_step3_desc")), start=1):
+            cards.addWidget(self._step_card(index, keys[0], keys[1]))
+        layout.addLayout(cards)
+
+        hint = QLabel()
+        hint.setObjectName("secondary")
+        hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bind(hint, "welcome_hint")
+        layout.addWidget(hint)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(10)
+        actions.addStretch(1)
+        create_btn = QPushButton()
+        create_btn.setObjectName("primary")
+        bind(create_btn, "btn_new_instance")
+        create_btn.clicked.connect(self._create_instance)
+        actions.addWidget(create_btn)
+        install_btn = QPushButton()
+        bind(install_btn, "btn_install_apk")
+        install_btn.clicked.connect(self._install_apk)
+        actions.addWidget(install_btn)
+        guide_btn = QPushButton()
+        bind(guide_btn, "btn_quick_start")
+        guide_btn.clicked.connect(self._open_quick_start)
+        actions.addWidget(guide_btn)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        layout.addStretch(1)
+        return page
+
+    def _step_card(self, index: int, title_key: str, text_key: str) -> QWidget:
+        card = QWidget()
+        card.setObjectName("card")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(16, 16, 16, 16)
+        inner.setSpacing(6)
+
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        badge = QLabel(str(index))
+        badge.setObjectName("step_index")
+        badge.setFixedSize(24, 24)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        step_title = QLabel()
+        step_title.setObjectName("step_title")
+        bind(step_title, title_key)
+        head.addWidget(badge)
+        head.addWidget(step_title, 1)
+
+        text = QLabel()
+        text.setObjectName("secondary")
+        text.setWordWrap(True)
+        bind(text, text_key)
+
+        inner.addLayout(head)
+        inner.addWidget(text)
+        return card
+
+    def _update_empty_state(self, instances: List[Instance]) -> None:
+        self._stack.setCurrentIndex(0 if instances else 1)
+
+    # ================================================================ quick start
+    def _open_quick_start(self) -> None:
+        QuickStartDialog(self).exec()
 
     # ================================================================ theme / language
     def _set_theme(self, mode: str) -> None:
@@ -287,6 +411,7 @@ class MainWindow(QMainWindow):
     def _tick(self) -> None:
         instances = self._service.instances.list_instances()
         self._refresh_table(instances)
+        self._update_empty_state(instances)
         self._update_summary(instances)
         self._update_vt_status()
 
@@ -347,6 +472,11 @@ class MainWindow(QMainWindow):
         more_btn.clicked.connect(lambda _c, iid=inst.id: self._show_row_menu(iid))
         layout.addWidget(more_btn)
         self._table.setCellWidget(row, len(COLS) - 1, actions)
+        # 首次建行即填充按钮文本/状态（否则要等下一次刷新才会显示）
+        start_btn.setText(tr("btn_stop") if inst.state == InstanceState.RUNNING
+                          else tr("btn_start"))
+        start_btn.setEnabled(inst.state in (
+            InstanceState.STOPPED, InstanceState.ERROR, InstanceState.RUNNING))
         self._rows[inst.id] = {"badge": badge, "start_btn": start_btn}
 
     # ================================================================ actions
@@ -449,6 +579,7 @@ class MainWindow(QMainWindow):
         menu.addAction(tr("btn_macro"),
                        lambda: MacroEditorDialog(self._service, inst, self).exec())
         menu.addSeparator()
+        menu.addAction(tr("btn_install_apk"), lambda: self._install_apk_for(inst))
         menu.addAction(tr("btn_push_file"), lambda: self._push_file(inst))
         menu.addAction(tr("btn_pull_file"), lambda: self._pull_file(inst))
         menu.addAction(tr("btn_sync_shared"), lambda: self._sync_shared(inst))
@@ -718,28 +849,46 @@ class MainWindow(QMainWindow):
             box.addButton(tr("btn_close"), QMessageBox.ButtonRole.AcceptRole)
             box.exec()
 
-    # ------------------------------------------------------------- drag & drop
-    def dragEnterEvent(self, event) -> None:  # noqa: N802
-        urls = event.mimeData().urls()
-        if urls and all(u.isLocalFile() and u.toLocalFile().lower().endswith(".apk")
-                        for u in urls):
-            event.acceptProposedAction()
+    # ------------------------------------------------------------- apk install
+    def _pick_apks(self) -> List[str]:
+        from PySide6.QtWidgets import QFileDialog
+        files, _ = QFileDialog.getOpenFileNames(
+            self, tr("msg_select_apk"), "",
+            "Android Package (*.apk);;All files (*)")
+        return [f for f in files if f.lower().endswith(".apk")]
 
-    def dropEvent(self, event) -> None:  # noqa: N802
-        apks = [u.toLocalFile() for u in event.mimeData().urls()]
-        if not apks:
+    def _install_apk(self) -> None:
+        """工具栏 / 欢迎页入口：选择 APK 并安装到运行中的实例。"""
+        instances = self._service.instances.list_instances()
+        if not instances:
+            QMessageBox.information(self, tr("msg_tip"), tr("msg_no_instance"))
             return
-        running = [i for i in self._service.instances.list_instances()
-                   if i.state == InstanceState.RUNNING]
+        running = [i for i in instances if i.state == InstanceState.RUNNING]
         if not running:
             QMessageBox.information(self, tr("msg_tip"), tr("msg_no_running_instance"))
             return
-        names = [i.name for i in running]
-        dlg = InstallPickerDialog(self, names, len(apks))
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        apks = self._pick_apks()
+        if apks:
+            self._install_apks(apks, running)
+
+    def _install_apk_for(self, inst: Instance) -> None:
+        """行菜单入口：安装到指定实例。"""
+        if inst.state != InstanceState.RUNNING:
+            QMessageBox.information(self, tr("msg_tip"), tr("err_instance_not_running"))
             return
-        chosen = set(dlg.checked())
-        targets = [i for i in running if i.name in chosen]
+        apks = self._pick_apks()
+        if apks:
+            self._install_apks(apks, [inst])
+
+    def _install_apks(self, apks: List[str], running: List[Instance]) -> None:
+        if len(running) > 1:
+            dlg = InstallPickerDialog(self, [i.name for i in running], len(apks))
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            chosen = set(dlg.checked())
+            targets = [i for i in running if i.name in chosen]
+        else:
+            targets = list(running)
         if not targets:
             return
 
@@ -757,6 +906,24 @@ class MainWindow(QMainWindow):
             self._after_generic("msg_install_success_count", count=count)
 
         AsyncRunner(self, tr("msg_installing"), job, done).start()
+
+    # ------------------------------------------------------------- drag & drop
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        urls = event.mimeData().urls()
+        if urls and all(u.isLocalFile() and u.toLocalFile().lower().endswith(".apk")
+                        for u in urls):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        apks = [u.toLocalFile() for u in event.mimeData().urls()]
+        if not apks:
+            return
+        running = [i for i in self._service.instances.list_instances()
+                   if i.state == InstanceState.RUNNING]
+        if not running:
+            QMessageBox.information(self, tr("msg_tip"), tr("msg_no_running_instance"))
+            return
+        self._install_apks(apks, running)
 
     # ------------------------------------------------------------- status
     def _update_summary(self, instances: List[Instance]) -> None:
@@ -779,9 +946,16 @@ class MainWindow(QMainWindow):
             if self._banner.isVisible():
                 self._banner.hide()
         else:
-            self._vt_btn.setText(f"⚠ {tr('vt_status_disabled')}")
+            status_key = {
+                REASON_FIRMWARE: "vt_status_disabled",
+                REASON_WHPX: "vt_status_whpx_missing",
+            }.get(vt.reason, "vt_status_unknown")
+            self._vt_btn.setText(f"⚠ {tr(status_key)}")
             self._vt_btn.setStyleSheet(
                 f"color: {WARNING_COLOR}; border: none; padding: 2px 8px;")
+            # 按检测结论给出对应文案：BIOS 未开 / Windows 虚拟化平台未启用
+            self._banner.set_text_key(
+                "vt_banner_whpx" if vt.reason == REASON_WHPX else "vt_banner_text")
             if not self._banner_shown:
                 self._banner_shown = True
                 self._banner.show()

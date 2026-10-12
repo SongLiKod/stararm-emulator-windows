@@ -3,6 +3,7 @@ import sys
 from typing import Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from config.i18n import get_translator
@@ -21,6 +22,8 @@ def run() -> int:
     app.setOrganizationName("StarARM")
     app.setApplicationName("StarARM Emulator")
     app.setStyle("Fusion")
+    # 现代化字体：Segoe UI（中文按字形自动回退到系统中文字体）
+    app.setFont(QFont("Segoe UI", 10))
 
     # 核心服务（全局配置 / 语言跟随系统 / 日志）
     service = StarARMService()

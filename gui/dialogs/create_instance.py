@@ -24,6 +24,8 @@ class CreateInstanceDialog(QDialog):
         self.setWindowTitle(tr("dlg_create_instance"))
         self.setMinimumWidth(520)
         root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
 
         # 基本信息
         group_basic = QGroupBox()

@@ -26,6 +26,8 @@ class MacroEditorDialog(QDialog):
         self.setWindowTitle(tr("dlg_macro_editor", name=instance.name))
         self.setMinimumSize(760, 520)
         root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
 
         top = QFormLayout()
         self._macro_name = QLineEdit("macro-1")

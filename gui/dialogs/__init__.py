@@ -4,9 +4,11 @@ from gui.dialogs.global_settings import GlobalSettingsDialog
 from gui.dialogs.instance_settings import InstanceSettingsDialog
 from gui.dialogs.keymap_editor import KeymapEditorDialog
 from gui.dialogs.macro_editor import MacroEditorDialog
+from gui.dialogs.quick_start import QuickStartDialog
 from gui.dialogs.virtualization_guide import VirtualizationGuideDialog
 
 __all__ = [
     "CreateInstanceDialog", "GlobalSettingsDialog", "InstanceSettingsDialog",
-    "KeymapEditorDialog", "MacroEditorDialog", "VirtualizationGuideDialog",
+    "KeymapEditorDialog", "MacroEditorDialog", "QuickStartDialog",
+    "VirtualizationGuideDialog",
 ]

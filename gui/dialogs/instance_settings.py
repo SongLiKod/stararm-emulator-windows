@@ -26,6 +26,8 @@ class InstanceSettingsDialog(QDialog):
         self.setWindowTitle(tr("dlg_instance_settings", name=instance.name))
         self.setMinimumWidth(560)
         root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
         self._tabs = QTabWidget()
 
         # -------------------------------------------------- 性能

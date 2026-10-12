@@ -44,3 +44,23 @@ def test_qss_contains_colors():
         assert color in qss
     assert "QPushButton#primary" in qss
     assert "QPushButton#danger" in qss
+
+
+def test_modern_visual_tokens_present():
+    for mode in ("light", "dark"):
+        p = load_theme(mode)
+        assert p["primary_hover"].startswith("#")
+        assert p["primary_pressed"].startswith("#")
+        assert p["success_text"].startswith("#")
+        assert p["warning_text"].startswith("#")
+        qss = build_qss(p)
+        # 圆角卡片 / 现代化交互
+        assert "border-radius: 12px" in qss
+        assert "QPushButton#primary:hover" in qss
+        assert "QHeaderView::section" in qss
+
+
+def test_build_qss_tolerates_partial_palette():
+    qss = build_qss({"background": "#101010"})
+    assert "#101010" in qss
+    assert "#FFFFFF" in qss  # 缺失配色走默认兜底，不会抛 KeyError

@@ -58,6 +58,8 @@ class GlobalSettingsDialog(QDialog):
         self.setWindowTitle(tr("dlg_global_settings"))
         self.setMinimumWidth(520)
         root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
 
         # 外观
         group_look = QGroupBox()
