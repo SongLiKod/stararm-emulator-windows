@@ -13,9 +13,11 @@ import zipfile
 from pathlib import Path
 
 # 与 core/qemu_manager.py build_args 契约一致的默认启动参数
-# （内核 ikconfig 无 virtio 驱动 → NVMe 根盘 + rootwait）
+# （内核 ikconfig 无 virtio 驱动 → NVMe 根盘 + rootwait；
+#  printk.devkmsg=on 解除 userspace 日志 ratelimit，供排查 apexd/init 卡点）
 DEFAULT_CMDLINE = (
-    "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw androidboot.hardware=stararm "
+    "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw printk.devkmsg=on "
+    "androidboot.hardware=stararm "
     "androidboot.selinux=permissive androidboot.vbmeta.device_state=unlocked "
     "androidboot.verifiedbootstate=orange"
 )

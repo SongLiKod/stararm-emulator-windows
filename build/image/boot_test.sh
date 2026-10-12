@@ -90,6 +90,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   if grep -q -E 'Kernel panic|VFS: Unable to mount root' "$SERIAL" 2>/dev/null; then
     fail "串口日志出现 panic/mount 失败"
   fi
+  # 重启循环快速失败（如 bootstrap-apexd-failed 反复 reboot，别等满 BOOT_TIMEOUT）
+  if [ "$(grep -c 'reboot: Restarting system' "$SERIAL" 2>/dev/null || true)" -ge 2 ]; then
+    fail "guest 进入重启循环（serial 中 reboot 原因见上文）"
+  fi
   sleep 15
 done
 fail "等待启动超时（${BOOT_TIMEOUT}s），adb state='$state'"
