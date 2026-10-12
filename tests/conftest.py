@@ -13,6 +13,7 @@ sys.path.insert(0, str(REPO))
 def stararm_home(tmp_path, monkeypatch):
     """每个测试使用独立的用户数据目录（不污染真实环境）。"""
     home = tmp_path / "stararm-home"
+    home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("STARARM_HOME", str(home))
     import config.i18n as i18n_mod
     i18n_mod._translator = None
