@@ -97,7 +97,13 @@ class StarARMLogger:
             pass
 
     # ------------------------------------------------------------------ log
-    def log(self, category: str, key: str, level: LogLevel = LogLevel.INFO, **params) -> LogEntry:
+    def log(self, category: str, key: str, level: "LogLevel | str" = LogLevel.INFO, **params) -> LogEntry:
+        if not isinstance(level, LogLevel):
+            # 允许调用方传入 "WARNING" / "ERROR" 等字符串级别
+            try:
+                level = LogLevel(str(level).upper())
+            except ValueError:
+                level = LogLevel.INFO
         entry = LogEntry(time.time(), level, category, key, params)
         with self._lock:
             self._write(entry)

@@ -66,6 +66,12 @@ QLabel {{
 QLabel#secondary {{
     color: {p['text_secondary']};
 }}
+QLabel#success {{
+    color: {p['success']};
+}}
+QLabel#warning {{
+    color: {p['warning']};
+}}
 QPushButton {{
     background-color: {p['surface']};
     color: {p['text']};

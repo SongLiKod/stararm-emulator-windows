@@ -1,4 +1,4 @@
-# 从镜像源下载内置标准 AOSP ARM64 镜像（Android 11-15）并导入用户数据目录。
+﻿# 从镜像源下载内置标准 AOSP ARM64 镜像（Android 11-15）并导入用户数据目录。
 # 镜像源 URL 来自全局设置（settings.json 的 image_source），也可用 -ImageSource 覆盖。
 param(
     [Parameter(Mandatory = $false)]

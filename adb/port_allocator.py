@@ -51,10 +51,25 @@ def allocate_ports(
     used_displays: Iterable[int] = (),
     used_agent: Iterable[int] = (),
 ) -> Tuple[int, int, int]:
-    """为实例分配 (adb_port, vnc_display, agent_port)；分配失败抛出 RuntimeError。"""
+    """为实例分配 (adb_port, vnc_display, agent_port)；分配失败抛出 RuntimeError。
+
+    ADB 端口范围（5555-6000）与 VNC 端口（5900 + display）存在重叠区，
+    分配时交叉排除，保证三类端口彼此不冲突。
+    """
     adb = find_free_port(ADB_PORT_RANGE[0], ADB_PORT_RANGE[1], set(used_adb))
-    display = find_free_display(set(used_displays))
-    agent = find_free_port(AGENT_PORT_RANGE[0], AGENT_PORT_RANGE[1], set(used_agent))
+    display_exclude = set(used_displays)
+    if adb is not None:
+        # 该 ADB 端口对应的 VNC display 编号（若落在 display 范围内）必须排除
+        conflict_display = adb - 5900
+        if VNC_DISPLAY_RANGE[0] <= conflict_display <= VNC_DISPLAY_RANGE[1]:
+            display_exclude.add(conflict_display)
+    display = find_free_display(display_exclude)
+    agent_exclude = set(used_agent)
+    if adb is not None:
+        agent_exclude.add(adb)
+    if display is not None:
+        agent_exclude.add(5900 + display)
+    agent = find_free_port(AGENT_PORT_RANGE[0], AGENT_PORT_RANGE[1], agent_exclude)
     if adb is None or display is None or agent is None:
         raise RuntimeError("err_no_free_port")
     return adb, display, agent

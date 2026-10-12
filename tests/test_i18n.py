@@ -37,7 +37,7 @@ SCAN_PATTERNS = [
     r"\.error\(\s*[\"']([a-z0-9_]+)[\"']",
     r"(?:AdbError|ImageManagerError|RuntimeError|KeyError)\(\s*[\"']([a-z0-9_]+)[\"']",
     r"ERROR_\w+\s*=\s*[\"']([a-z0-9_]+)[\"']",
-    r'_(?:ok|fail)_key\s*=\s*[\"']([a-z0-9_]+)[\"']",
+    r"_(?:ok|fail)_key\s*=\s*[\"']([a-z0-9_]+)[\"']",
 ]
 
 

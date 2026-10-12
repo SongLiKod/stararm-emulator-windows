@@ -102,6 +102,8 @@ def test_apply_profile_with_agent_primary(fake_adb):
     cfg = InstanceConfig()
     cfg.device = generate_profile()
     cfg.device.imei = generate_imei()
+    cfg.gps.latitude = 1.5
+    cfg.gps.longitude = 2.5
     report = dict(apply_profile(fake_adb, FakeAgent(), cfg, android_version=15))
     assert report["props"] is True
     assert report["gps"] is True

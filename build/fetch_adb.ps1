@@ -1,4 +1,4 @@
-# 获取原生 adb（Google 官方 platform-tools），内置封装到部署包 adb-runtime/
+﻿# 获取原生 adb（Google 官方 platform-tools），内置封装到部署包 adb-runtime/
 param(
     [Parameter(Mandatory = $false)]
     [string]$Destination = ".\adb-runtime"

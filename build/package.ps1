@@ -1,4 +1,4 @@
-# 星模ARM原生安卓模拟器 - 打包部署脚本
+﻿# 星模ARM原生安卓模拟器 - 打包部署脚本
 # 产物：release/StarARM-win64-<version>.zip（绿色免配置一键部署）
 # 可选：-WithQemu / -WithAdb 内置封装底层 QEMU 与 ADB 组件
 param(
