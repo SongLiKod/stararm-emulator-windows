@@ -48,7 +48,7 @@
   "arch": "arm64-v8a",
   "kernel": "Image",
   "ramdisk": "ramdisk.img",
-  "cmdline": "console=ttyAMA0,38400 root=/dev/vda1 rw androidboot.hardware=stararm",
+  "cmdline": "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw androidboot.hardware=stararm",
   "drives": [{"file": "system.img", "format": "raw", "id": "system", "base": "true"}]
 }
 ```

@@ -11,7 +11,7 @@ def make_image(tmp_path: Path):
     manifest = ImageManifest(
         id="aosp-13-arm64", name="AOSP 13", android_version=13,
         kernel="Image", ramdisk="ramdisk.img",
-        cmdline="console=ttyAMA0 root=/dev/vda1 rw",
+        cmdline="console=ttyAMA0 root=/dev/nvme0n1 rootwait rw",
         drives=[{"file": "system.img", "format": "raw", "id": "system",
                  "base": "true"}],
     )
@@ -57,10 +57,10 @@ def test_build_args_nat_whpx_virgl_vulkan(tmp_path):
     assert "virtio-gpu-gl-device,venus=on" in args
     assert "egl-headless" in args
     assert args[args.index("-vnc") + 1] == "127.0.0.1:3"
-    # NAT 网络 + 独立 ADB 端口 hostfwd
+    # NAT 网络 + 独立 ADB 端口 hostfwd（内核无 virtio-net → xhci + usb-net）
     assert f"tcp:127.0.0.1:5555-:5555" in text
     assert "-netdev" in args and "user,id=net0" in text
-    assert "virtio-net-device" in text
+    assert "qemu-xhci" in text and "usb-net,netdev=net0" in text
     # 客户代理通道（virtio-serial）
     assert "host=127.0.0.1,port=25000,server=on,wait=off" in text
     assert "virtserialport" in text and "stararm.agent" in text
@@ -106,9 +106,9 @@ def test_build_args_overlay_drive(tmp_path):
                                   graphics="software", overlay=overlay)
     text = " ".join(args)
     assert str(overlay) in text and "format=qcow2" in text
-    # 只读系统盘 + 实例覆盖盘
+    # 只读系统盘 + 实例覆盖盘（内核无 virtio-blk → NVMe 双盘）
     assert "readonly=on" in text
-    assert "virtio-blk-device" in text
+    assert "nvme,drive=hd0" in text and "nvme,drive=hd1" in text
 
 
 def test_classify_qemu_error():

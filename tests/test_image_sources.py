@@ -23,7 +23,7 @@ def make_image_zip(android_version: int = 13) -> bytes:
             "name": f"AOSP {android_version} (ARM64)",
             "android_version": android_version, "arch": "arm64-v8a",
             "kernel": "Image",
-            "cmdline": "console=ttyAMA0 root=/dev/vda1 rw",
+            "cmdline": "console=ttyAMA0 root=/dev/nvme0n1 rootwait rw",
             "drives": [{"file": "system.img", "format": "raw", "id": "system",
                         "base": "true"}],
         }))

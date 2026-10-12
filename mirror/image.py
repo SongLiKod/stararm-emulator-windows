@@ -26,7 +26,7 @@ class ImageManifest:
     arch: str = "arm64-v8a"          # 必须为 ARM64 架构，禁止导入 X86 镜像
     kernel: str = "Image"
     ramdisk: str = ""                # 可选
-    cmdline: str = "console=ttyAMA0,38400 root=/dev/vda1 rw androidboot.hardware=stararm"
+    cmdline: str = "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw androidboot.hardware=stararm"
     dtb: str = ""                    # 可选
     drives: List[Dict[str, str]] = field(default_factory=lambda: [
         {"file": "system.img", "format": "raw", "id": "system", "base": "true"}

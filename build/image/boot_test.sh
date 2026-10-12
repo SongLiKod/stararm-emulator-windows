@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # StarARM 镜像启动冒烟测试（CI 用 TCG，无需 KVM）：
 #   按 core/qemu_manager.py build_args 契约启动 → 轮询 adb sys.boot_completed=1 → 判定成功
+# 内核 ikconfig 实证无 virtio 驱动（# CONFIG_VIRTIO_BLK/_NET/_MMIO is not set）：
+#   根盘/数据盘 = NVMe（CONFIG_BLK_DEV_NVME=y），网卡 = qemu-xhci + usb-net（CDC ECM，
+#   guest 端 cdc_ether/usbnet 在 system_dlkm），无 virtio-gpu/rng 设备（后端无驱动，忽略）。
 # 产物: $WORK/serial.log（内核/init 日志）、$WORK/qemu.log、$WORK/boot-test-*.txt
 set -euo pipefail
 
@@ -44,13 +47,13 @@ SERIAL="$WORK/serial.log"
   -kernel "$DIST/Image" \
   -append "$CMDLINE androidboot.serialno=stararmci01" \
   -drive "if=none,file=$DIST/system.img,format=raw,id=hd0,readonly=on" \
-  -device virtio-blk-device,drive=hd0 \
+  -device nvme,drive=hd0,serial=stararm0 \
   -drive "if=none,file=$WORK/data.qcow2,format=qcow2,id=hd1" \
-  -device virtio-blk-device,drive=hd1 \
-  -device virtio-gpu-device -display none \
+  -device nvme,drive=hd1,serial=stararm1 \
+  -display none \
+  -device qemu-xhci,id=xhci \
   -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${ADB_PORT}-:5555" \
-  -device virtio-net-device,netdev=net0 \
-  -device virtio-rng-device \
+  -device usb-net,netdev=net0 \
   -serial "file:$SERIAL" -monitor none \
   > "$WORK/qemu.log" 2>&1 &
 QPID=$!

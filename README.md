@@ -143,6 +143,9 @@ QEMU 侧：`-chardev socket,...,host=127.0.0.1,port=<agent_port>,server=on,wait=
 
 通道不可用时自动回退 ADB（setprop / settings put / dumpsys battery 等）。
 
+> 注：当前镜像内核 ikconfig 无 `CONFIG_VIRTIO_CONSOLE`（GKI 实证），virtio-serial 通道
+> 暂不可用 → 各功能实际走 ADB 回退路径；待提供带 virtio 驱动的内核后此通道才会生效。
+
 ## CI（GitHub Actions）
 
 `.github/workflows/build.yml`（结构参照成熟 workflow）：

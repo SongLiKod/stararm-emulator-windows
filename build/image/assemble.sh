@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 把 Cuttlefish/AOSP 的 super.img + boot/init_boot/vendor_boot 组装成 StarARM 约定的单分区镜像：
 #   staging 根分区 = init_boot 通用 ramdisk(/init 等) + vendor ramdisk + system/system_ext/vendor/product/odm 合并树
-#   /data 由实例覆盖盘（qcow2 → /dev/vda2）提供，fstab.stararm 负责首启格式化挂载
+#   /data 由实例覆盖盘（qcow2 → /dev/nvme1n1，第二块 NVMe）提供，fstab.stararm 负责首启格式化挂载
 # 依赖: otatools(lpunpack/simg2img/mkuserimg_mke2fs/unpack_bootimg), e2fsprogs, cpio, unzip, sudo(loop mount)
 set -euo pipefail
 
@@ -164,13 +164,13 @@ cp "$WORK/boot/kernel" "$OUT/Image"
 log "kernel → $OUT/Image ($(du -h "$OUT/Image" | cut -f1))"
 
 # ---- 6. 定制：fstab / 属性 / 清理 ----
-log "写入 fstab.stararm（/data ← 覆盖盘 vda2，首启自动格式化）"
+log "写入 fstab.stararm（/data ← 覆盖盘 nvme1n1，首启自动格式化）"
 find "$STAGING" -maxdepth 4 -name 'fstab.*' -not -name 'fstab.stararm' -delete || true
 for dest in "$STAGING/fstab.stararm" "$STAGING/system/etc/fstab.stararm"; do
   mkdir -p "$(dirname "$dest")"
   printf '%s\n' \
     '# <src>   <mnt_point> <type> <mount_flags> <fs_mgr_flags>' \
-    '/dev/vda2  /data      ext4   defaults     wait,formattable,check,latemount' \
+    '/dev/nvme1n1 /data      ext4   defaults     wait,formattable,check,latemount' \
     > "$dest"
 done
 

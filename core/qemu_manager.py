@@ -555,19 +555,22 @@ class QemuManager:
         args += ["-append", cmdline]
 
         # 磁盘：镜像只读盘 + 实例独立 qcow2 覆盖层（数据隔离）
+        # 内核 ikconfig 无 virtio 块/传输驱动（# CONFIG_VIRTIO_BLK is not set、
+        # # CONFIG_VIRTIO_MMIO is not set），改走 NVMe（CONFIG_BLK_DEV_NVME=y +
+        # CONFIG_PCI_HOST_GENERIC=y，QEMU virt 机 PCIe 挂载）
         index = 0
         for drive in image.manifest.drives:
             readonly = "on" if str(drive.get("base", "")).lower() in ("1", "true", "yes") else "off"
             args += [
                 "-drive", f"if=none,file={_host_without_drive(image.file_path(drive['file']))},"
                           f"format={drive.get('format', 'raw')},id=hd{index},readonly={readonly}",
-                "-device", f"virtio-blk-device,drive=hd{index}",
+                "-device", f"nvme,drive=hd{index},serial=stararm{index}",
             ]
             index += 1
         if overlay is not None:
             args += [
                 "-drive", f"if=none,file={_host_without_drive(overlay)},format=qcow2,id=hd{index}",
-                "-device", f"virtio-blk-device,drive=hd{index}",
+                "-device", f"nvme,drive=hd{index},serial=stararm{index}",
             ]
 
         # 图形加速：VirGL（OpenGL ES / Vulkan via Venus），VNC 显示转发
@@ -580,19 +583,23 @@ class QemuManager:
         if cfg.vnc_display >= 0:
             args += ["-vnc", f"127.0.0.1:{int(cfg.vnc_display)}"]
 
-        # 网络：NAT（默认）/ 桥接；ADB 管理通道始终走用户网络 hostfwd（独立 ADB 端口）
+        # 网络：内核无 virtio-net（# CONFIG_VIRTIO_NET is not set），ADB 管理通道
+        # 走用户网络 hostfwd；guest 侧网卡为 QEMU usb-net（CDC ECM + RNDIS 双协议，
+        # 内核 CONFIG_USB_XHCI_HCD=y，cdc_ether/usbnet 模块在 system_dlkm）
         adb_hostfwd = f"tcp:127.0.0.1:{int(cfg.adb_port)}-:5555"
         if cfg.network_mode == "bridge":
             args += [
+                "-device", "qemu-xhci,id=xhci",
                 "-netdev", f"tap,id=net0,ifname={cfg.bridge_adapter or 'tap0'}",
-                "-device", "virtio-net-device,netdev=net0",
+                "-device", "usb-net,netdev=net0",
                 "-netdev", f"user,id=netmgmt,hostfwd={adb_hostfwd}",
-                "-device", "virtio-net-device,netdev=netmgmt",
+                "-device", "usb-net,netdev=netmgmt",
             ]
         else:
             args += [
+                "-device", "qemu-xhci,id=xhci",
                 "-netdev", f"user,id=net0,hostfwd={adb_hostfwd}",
-                "-device", "virtio-net-device,netdev=net0",
+                "-device", "usb-net,netdev=net0",
             ]
 
         # 客户代理通道（virtio-serial）：GPS / 剪贴板 / IMEI / 属性
@@ -603,8 +610,7 @@ class QemuManager:
                 "-device", "virtserialport,chardev=ga0,name=stararm.agent",
             ]
 
-        # 随机数 / 串口日志（启动故障诊断）
-        args += ["-device", "virtio-rng-device"]
+        # 随机数：ikconfig `# CONFIG_HW_RANDOM_VIRTIO is not set`，virtio-rng 无后端驱动，不挂
         return args
 
 

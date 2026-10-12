@@ -42,18 +42,21 @@ Actions → **build-image** → `Run workflow`：
 ## 镜像契约（务必保持）
 
 - 内核 `Image` + `-M virt -cpu cortex-a76`，无 initrd（`/init` 在根分区）；
-- `cmdline`：`root=/dev/vda1`、`androidboot.hardware=stararm`、`androidboot.selinux=permissive`
-  （组装镜像未重签 verity/AVB，必须 permissive + 解锁状态）；
-- **vda1** = 只读根分区（`system.img`），**vda2** = 实例 qcow2 覆盖层 → 由
+  内核为 CF 同款 GKI（ikconfig 实证：**无任何 virtio 驱动**，有 NVMe/xhci/ext4/erofs）；
+- `cmdline`：`root=/dev/nvme0n1 rootwait`、`androidboot.hardware=stararm`、`androidboot.selinux=permissive`
+  （组装镜像未重签 verity/AVB，必须 permissive + 解锁状态；`rootwait` 等 NVMe PCIe 异步探测）；
+- **nvme0n1** = 只读根分区（`system.img`），**nvme1n1** = 实例 qcow2 覆盖层 → 由
   `fstab.stararm` 挂载为 `/data`，`formattable` 首启自动格式化；
+- 网卡 = `qemu-xhci` + `usb-net`（CDC ECM/RNDIS，guest 端 `cdc_ether`/`usbnet` 模块在
+  system_dlkm）；ADB 管理通道始终走用户网络 `hostfwd`；
 - adbd 监听 TCP 5555（`service.adb.tcp.port` 已写入 `system/build.prop`）。
 
 ## 已知风险 / 失败排查
 
 | 症状 | 方向 |
 | --- | --- |
-| 串口 `Kernel panic: VFS: Unable to mount root fs` | ext4 未按 `root=/dev/vda1` 出现在 vda1，检查 `drives` 与打包文件名 |
-| 早期卡死无输出 | 内核可能缺 `CONFIG_VIRTIO_MMIO`（virtio-blk/gpu/net 均为 MMIO）→ 需换内核分支重编 |
+| 串口 `Kernel panic: VFS: Unable to mount root fs` 或 `error -6` | NVMe 枚举失败：查 serial 中 `nvme`/`pci` 行；确认 `cmdline` 含 `root=/dev/nvme0n1 rootwait`、盘序 hd0=root |
+| 串口有 `nvme` 但无 adb（TCP 5555 不通） | usb-net 枚举失败 → 查 `xhci`/`cdc_ether` 行；或 `cdc_ether` 未在 `modules.load` 自动加载 → `adb shell lsmod`（需先串口诊断） |
 | `init: ...` 反复重启 | 看 `serial.log` 中 fstab/`/data` 报错；确认 `fstab.stararm` 已覆盖厂商 fstab |
 | 特权域被拒 | 保持 `androidboot.selinux=permissive`；后续可做 sepolicy 定制 |
 | zip 超 1.9GB | 增大 `PRUNE`（如 `system/media`、32 位库、预置 APK）后重建 |

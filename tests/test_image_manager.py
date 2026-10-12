@@ -18,7 +18,7 @@ def make_image_dir(base, android_version=13, arch="arm64-v8a"):
         "id": d.name, "name": f"AOSP {android_version} (ARM64)",
         "android_version": android_version, "arch": arch,
         "kernel": "Image",
-        "cmdline": "console=ttyAMA0 root=/dev/vda1 rw",
+        "cmdline": "console=ttyAMA0 root=/dev/nvme0n1 rootwait rw",
         "drives": [{"file": "system.img", "format": "raw", "id": "system",
                     "base": "true"}],
     }), encoding="utf-8")
