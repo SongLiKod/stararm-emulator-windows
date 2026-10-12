@@ -207,7 +207,10 @@ mkdir -p "$STAGING/data"
 # ---- 7. 打包为单 ext4（保留源 uid/gid/mode + SELinux 上下文）----
 log "汇总 file_contexts"
 FC="$WORK/combined_file_contexts"
-: > "$FC"
+# 兜底 .* 必须在文件最前：libselinux lookup_all 反向扫描（"最后一条匹配的 meta 规则获胜"），
+# sort_specs 只把静态规则移到末尾（最先检查）。实证（run 38301659078）：.* 追加在末尾时成为
+# 最后一条匹配规则 → 所有非静态命中的文件全被打成 system_file（boringssl 门禁因此 reboot）。
+printf '%s %s\n' '.*' 'u:object_r:system_file:s0' > "$FC"
 # 只汇总文本 file_contexts；本构建 *_selinux_fc 指向 file_contexts.bin（二进制，混入会损坏规则）
 # 每文件后强制补一个换行（AOSP 构建同样强制插入），防止源文件缺尾换行时两文件首行粘连损坏规则
 while IFS= read -r f; do
@@ -220,7 +223,7 @@ echo "    FC 内 boringssl 规则 $(grep -c 'bin/boringssl_self_test' "$FC") 条
 grep 'bin/boringssl_self_test' "$FC" | sed 's/^/    FC: /' || true
 
 # 组装根新增/改名的路径可能不在原 file_contexts 中；e2fsdroid 查不到标签会直接失败，
-# 按需补齐（同正则已存在则跳过，避免重复规则），最后加兜底规则。
+# 按需补齐（同正则已存在则跳过）。兜底 .* 已置顶，这里只补静态规则与缺失正则。
 add_fc() { # regex context —— 用 ENVIRON 传参避免 awk -v 处理反斜杠转义
   if ! FC_R="$1" awk 'BEGIN{r=ENVIRON["FC_R"]; f=1} $1==r{f=0} END{exit f}' "$FC"; then
     printf '%s %s\n' "$1" "$2" >> "$FC"
@@ -229,14 +232,15 @@ add_fc() { # regex context —— 用 ENVIRON 传参避免 awk -v 处理反斜�
 }
 add_fc '/'                      'u:object_r:rootfs:s0'
 add_fc '/data'                  'u:object_r:system_data_file:s0'
-add_fc '/fstab\\..*'            'u:object_r:rootfs:s0'
-add_fc '/system/etc/fstab\\..*' 'u:object_r:system_file:s0'
+add_fc '/fstab\..*'             'u:object_r:rootfs:s0'
+add_fc '/system/etc/fstab\..*'  'u:object_r:system_file:s0'
 add_fc '/init'                  'u:object_r:init_exec:s0'
-add_fc '/init\\..*'             'u:object_r:init_exec:s0'
-# 实测镜像内该二进制被打成 system_file 导致 init exec_start 门禁 reboot（boringssl-self-check-failed）；
-# 规则取自 system/sepolicy/private/file_contexts（android14-release），必须在兜底 .* 之前生效
-add_fc '/(vendor|system/vendor)/bin/boringssl_self_test(32|64)' 'u:object_r:vendor_boringssl_self_test_exec:s0'
-add_fc '.*'                     'u:object_r:system_file:s0'
+add_fc '/init\..*'              'u:object_r:rootfs:s0'
+# 静态规则（无元字符）在反向扫描中最先检查、优先级最高。init exec_start 门禁硬性要求
+# vendor 侧 boringssl 自检二进制标签为 vendor_boringssl_self_test_exec（AOSP
+# system/sepolicy private/file_contexts 实证），否则 reboot,boringssl-self-check-failed。
+add_fc '/vendor/bin/boringssl_self_test32' 'u:object_r:vendor_boringssl_self_test_exec:s0'
+add_fc '/vendor/bin/boringssl_self_test64' 'u:object_r:vendor_boringssl_self_test_exec:s0'
 echo "[assemble]   file_contexts 规则数: $(grep -c '' "$FC")"
 
 BYTES=$(du -sb "$STAGING" | cut -f1)
