@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from config.settings import GlobalSettings
 from gui.i18n import bind, tr
+from mirror.image_manager import load_sources
 
 
 class _PathPicker(QWidget):
@@ -123,9 +124,41 @@ class GlobalSettingsDialog(QDialog):
         adb_label = QLabel(); bind(adb_label, "lbl_adb_path")
         form_path.addRow(adb_label, self._adb_path)
 
-        self._image_source = QLineEdit(s.image_source)
         src_label = QLabel(); bind(src_label, "lbl_image_source")
-        form_path.addRow(src_label, self._image_source)
+        self._source_combo = QComboBox()
+        self._source_combo.addItem(tr("src_auto"), "auto")
+        self._sources = load_sources()
+        for src in self._sources:
+            region = tr("src_region_china") if src["region"] == "china" else tr("src_region_global")
+            self._source_combo.addItem(f"{region} · {src['name']}", src["id"])
+        self._source_combo.addItem(tr("src_custom"), "custom")
+        chosen = (s.image_source_id or "auto").strip() or "auto"
+        index = self._find_data(self._source_combo, chosen)
+        if self._source_combo.itemData(index) != chosen:
+            index = 0
+        self._source_combo.setCurrentIndex(index)
+        self._source_combo.currentIndexChanged.connect(self._sync_source_rows)
+        form_path.addRow(src_label, self._source_combo)
+
+        self._image_source = QLineEdit(s.image_source)
+        self._image_source.setPlaceholderText(tr("hint_image_source_url"))
+        form_path.addRow("", self._image_source)
+
+        check_row = QHBoxLayout()
+        self._check_btn = QPushButton(); bind(self._check_btn, "btn_check_source")
+        self._check_btn.clicked.connect(self._check_source)
+        self._check_status = QLabel()
+        self._check_status.setObjectName("secondary")
+        self._check_status.setWordWrap(True)
+        check_row.addWidget(self._check_btn)
+        check_row.addWidget(self._check_status, 1)
+        form_path.addRow("", check_row)
+
+        src_hint = QLabel(); bind(src_hint, "hint_image_source")
+        src_hint.setWordWrap(True)
+        src_hint.setObjectName("secondary")
+        form_path.addRow("", src_hint)
+        self._sync_source_rows()
 
         self._shared_folder = _PathPicker("dir")
         self._shared_folder.setText(s.shared_folder)
@@ -149,6 +182,45 @@ class GlobalSettingsDialog(QDialog):
                 return index
         return 0
 
+    def _sync_source_rows(self) -> None:
+        self._image_source.setVisible(self._source_combo.currentData() == "custom")
+
+    def _source_base(self) -> str:
+        source_id = self._source_combo.currentData()
+        if source_id == "custom":
+            return self._image_source.text().strip()
+        for src in self._sources:
+            if src["id"] == source_id:
+                return src["base_url"]
+        return ""
+
+    def _check_source(self) -> None:
+        """异步 HEAD 探测当前镜像源：可用 / 源可达但暂无镜像 / 无法连接。"""
+        from gui.widgets import AsyncRunner
+        from mirror.image_manager import ImageManager, load_sources
+        base = self._source_base()
+        if not base:
+            self._check_status.setText(tr("err_no_image_source"))
+            return
+        if self._source_combo.currentData() != "custom" and not self._sources:
+            self._sources = load_sources()
+
+        def job():
+            return ImageManager(self._settings).check_source(base)
+
+        def done(result):
+            state, detail = result
+            if state == "ok":
+                text = tr("msg_source_ok", image=detail)
+            elif state == "missing":
+                text = tr("msg_source_missing")
+            else:
+                text = tr("msg_source_unreachable", detail=detail)
+            self._check_status.setText(text)
+
+        self._check_status.setText(tr("msg_working"))
+        AsyncRunner(self, tr("msg_working"), job, done).start()
+
     def accept(self) -> None:  # noqa: D102
         self._settings.update(
             theme_mode=self._theme.currentData(),
@@ -160,6 +232,7 @@ class GlobalSettingsDialog(QDialog):
             qemu_path=self._qemu_path.text(),
             adb_path=self._adb_path.text(),
             image_source=self._image_source.text().strip(),
+            image_source_id=str(self._source_combo.currentData() or "auto"),
             shared_folder=self._shared_folder.text(),
         )
         super().accept()

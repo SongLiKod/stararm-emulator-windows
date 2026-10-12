@@ -48,8 +48,21 @@ class CreateInstanceDialog(QDialog):
         self._download_btn = QPushButton()
         bind(self._download_btn, "btn_download_image")
         self._download_btn.clicked.connect(self._download_image)
-        dl_label = QLabel(); bind(dl_label, "lbl_image_source")
-        form_basic.addRow(dl_label, self._download_btn)
+        dl_hint = QLabel()
+        bind(dl_hint, "hint_image_source")
+        dl_hint.setWordWrap(True)
+        dl_hint.setObjectName("secondary")
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(self._download_btn)
+        btn_row.addStretch(1)
+        dl_widget = QWidget()
+        dl_layout = QVBoxLayout(dl_widget)
+        dl_layout.setContentsMargins(0, 0, 0, 0)
+        dl_layout.setSpacing(4)
+        dl_layout.addLayout(btn_row)
+        dl_layout.addWidget(dl_hint)
+        dl_label = QLabel(); bind(dl_label, "lbl_builtin_images")
+        form_basic.addRow(dl_label, dl_widget)
         root.addWidget(group_basic)
 
         # 资源配置
@@ -170,9 +183,18 @@ class CreateInstanceDialog(QDialog):
             QMessageBox.warning(self, tr("msg_error"), tr(exc.key))
 
     def _download_image(self) -> None:
-        """从镜像源下载所选内置镜像（Android 11-15）。"""
+        """从镜像源下载所选内置镜像（Android 11-15）；未配置镜像源时引导去设置。"""
+        from PySide6.QtWidgets import QMessageBox
         from gui.widgets import AsyncRunner
         image_id = self._image.currentData()
+        if not image_id:
+            QMessageBox.warning(self, tr("msg_error"), tr("err_image_required"))
+            return
+        setting = self._service.settings.get()
+        chosen = (getattr(setting, "image_source_id", "") or "auto").strip() or "auto"
+        if chosen == "custom" and not (setting.image_source or "").strip():
+            self._prompt_image_source()
+            return
 
         def job():
             return self._service.images.download_builtin(image_id)
@@ -180,6 +202,22 @@ class CreateInstanceDialog(QDialog):
         AsyncRunner(self, tr("msg_downloading"), job,
                     lambda _img: self._load_images(),
                     lambda detail: self._show_error(detail)).start()
+
+    def _prompt_image_source(self) -> None:
+        """未配置镜像源：给出可读提示并提供“打开全局设置”入口（设置后继续下载）。"""
+        from PySide6.QtWidgets import QMessageBox
+        from gui.dialogs.global_settings import GlobalSettingsDialog
+        box = QMessageBox(QMessageBox.Icon.Information, tr("lbl_image_source"),
+                          tr("err_no_image_source"),
+                          QMessageBox.StandardButton.NoButton, self)
+        settings_btn = box.addButton(tr("btn_open_settings"),
+                                     QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(tr("btn_cancel"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(settings_btn)
+        box.exec()
+        if box.clickedButton() is settings_btn and \
+                GlobalSettingsDialog(self._service, self).exec():
+            self._download_image()
 
     def _show_error(self, detail: str) -> None:
         from PySide6.QtWidgets import QMessageBox

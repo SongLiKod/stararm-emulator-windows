@@ -111,7 +111,9 @@ def test_get_ready_requires_files(stararm_home):
 
 
 def test_download_without_source_raises(stararm_home):
+    """选择“自定义 URL”但未填写时给出明确提示（默认“自动”则走内置源，不报此错）。"""
     settings = SettingsManager()
+    settings.update(image_source_id="custom", image_source="")
     mgr = ImageManager(settings)
     with pytest.raises(ImageManagerError) as excinfo:
         mgr.download_builtin("aosp-13-arm64")

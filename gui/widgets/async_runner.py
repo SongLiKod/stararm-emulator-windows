@@ -10,7 +10,7 @@ from gui.i18n import tr
 
 class _Worker(QObject):
     finished_ok = Signal(object)
-    failed = Signal(str)
+    failed = Signal(str, object)
 
     def __init__(self, job: Callable[[], Any]) -> None:
         super().__init__()
@@ -22,7 +22,19 @@ class _Worker(QObject):
             self.finished_ok.emit(result)
         except Exception as exc:  # noqa: BLE001
             detail = f"{exc}\n{traceback.format_exc(limit=3)}"
-            self.failed.emit(detail[:800])
+            self.failed.emit(detail[:800], exc)
+
+
+def format_error(detail: str, exc: object = None) -> str:
+    """把后台异常转成给用户看的提示：带 i18n 词条 key 的异常输出本地化文案（不带堆栈），
+    未知异常保留 err_unknown + 技术细节。"""
+    key = getattr(exc, "key", None)
+    if isinstance(key, str) and key:
+        text = tr(key)
+        if text != key:
+            extra = str(getattr(exc, "detail", "") or "").strip()
+            return f"{text}\n{extra[:300]}" if extra else text
+    return f"{tr('err_unknown')}\n{detail[:400]}"
 
 
 class AsyncRunner(QObject):
@@ -61,13 +73,13 @@ class AsyncRunner(QObject):
         if self._on_done is not None:
             self._on_done(result)
 
-    def _on_error(self, detail: str) -> None:
+    def _on_error(self, detail: str, exc: object) -> None:
         self._thread.quit()
         self._thread.wait(3000)
         if self._dialog is not None:
             self._dialog.close()
-        self._on_fail(detail)
+        self._on_fail(format_error(detail, exc))
 
     @staticmethod
     def show_error(parent: Optional[QWidget], detail: str) -> None:
-        QMessageBox.warning(parent, tr("msg_error"), tr("err_unknown") + "\n" + detail[:400])
+        QMessageBox.warning(parent, tr("msg_error"), detail[:400])

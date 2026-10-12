@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "naming": "<base_url>/<image_id>.zip（zip 内含 image.json、Image、system.img 等，ARM64）",
+  "sources": [
+    {
+      "id": "ghfast",
+      "region": "china",
+      "name": "ghfast.top",
+      "base_url": "https://ghfast.top/https://github.com/SongLiKod/stararm-emulator-windows/releases/download/images",
+      "homepage": "https://ghfast.top"
+    },
+    {
+      "id": "hfmirror",
+      "region": "china",
+      "name": "hf-mirror.com",
+      "base_url": "https://hf-mirror.com/datasets/SongLiKod/stararm-images/resolve/main",
+      "homepage": "https://hf-mirror.com"
+    },
+    {
+      "id": "github",
+      "region": "global",
+      "name": "GitHub Releases",
+      "base_url": "https://github.com/SongLiKod/stararm-emulator-windows/releases/download/images",
+      "homepage": "https://github.com/SongLiKod/stararm-emulator-windows/releases"
+    },
+    {
+      "id": "hf",
+      "region": "global",
+      "name": "Hugging Face",
+      "base_url": "https://huggingface.co/datasets/SongLiKod/stararm-images/resolve/main",
+      "homepage": "https://huggingface.co/datasets/SongLiKod/stararm-images"
+    }
+  ]
+}

@@ -4,9 +4,29 @@
 
 镜像体积较大，不随 git 仓库分发，通过以下任一方式获取：
 
-1. 打包部署：运行 `build/fetch_images.ps1`（从全局设置的镜像源下载）；
-2. 手动导入：GUI「导入镜像」或 CLI `stararm-cli import-image <目录或zip>`；
-3. 镜像源下载：全局设置「镜像源 URL」+ GUI 新建实例时按需下载。
+1. 内置源下载：GUI 新建实例点「下载所选内置镜像」（默认自动逐源尝试，国内优先，失败回退）；
+2. 打包部署：运行 `build/fetch_images.ps1`（与 GUI 使用同一套源设置）；
+3. 手动导入：GUI「导入镜像」或 CLI `stararm-cli import-image <目录或zip>`。
+
+## 内置镜像源（resource/image_sources.json）
+
+| 区域 | 源 | 基地址（下载 `<基地址>/<镜像ID>.zip`） |
+| --- | --- | --- |
+| 国内 | ghfast.top | `https://ghfast.top/https://github.com/SongLiKod/stararm-emulator-windows/releases/download/images` |
+| 国内 | hf-mirror.com | `https://hf-mirror.com/datasets/SongLiKod/stararm-images/resolve/main` |
+| 海外 | GitHub Releases | `https://github.com/SongLiKod/stararm-emulator-windows/releases/download/images` |
+| 海外 | Hugging Face | `https://huggingface.co/datasets/SongLiKod/stararm-images/resolve/main` |
+
+发布镜像包（两个源组一次搞定）：
+
+```powershell
+# 镜像目录须含 image.json（读取其 id 决定 zip 名）
+./build/publish_images.ps1 -ImageDir <镜像目录>            # 打包 + 上传 GitHub Release「images」+ HuggingFace
+./build/publish_images.ps1 -ImageDir <镜像目录> -SkipHf    # 只发 GitHub（ghfast.top 随即可用）
+```
+
+- GitHub：自动读取本机 git 凭据管理器中的 `github.com` 可写 token，无需配置。
+- HuggingFace（`hf-mirror.com` / `huggingface.co`）：https://huggingface.co/settings/tokens 新建 **write** 权限 token → `setx HF_TOKEN hf_xxx` → 重跑脚本；依赖 `pip install huggingface_hub`（可用 `-i https://pypi.tuna.tsinghua.edu.cn/simple` 加速）。
 
 ## 内置镜像定义
 

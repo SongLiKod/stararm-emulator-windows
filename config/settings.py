@@ -24,7 +24,8 @@ class GlobalSettings:
     max_total_memory_gb: int = 0    # 0 = 按主机自动
     qemu_path: str = ""             # 留空自动查找
     adb_path: str = ""              # 留空自动查找
-    image_source: str = ""          # 内置镜像下载源 URL（留空则需手动导入）
+    image_source: str = ""          # 自定义镜像下载源 URL（image_source_id=custom 时生效）
+    image_source_id: str = ""       # 内置镜像源选择：""/"auto"=自动逐源尝试，"custom"=自定义 URL，其他=内置源 id
     shared_folder: str = ""         # 共享文件夹（留空用默认目录）
 
     def validate(self) -> None:

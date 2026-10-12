@@ -64,6 +64,36 @@ python -m pytest tests -q
 ./build/fetch_images.ps1                           # 从镜像源获取内置镜像
 ```
 
+## 系统镜像来源
+
+内置项只随包附带**镜像定义**（Android 11-15，`aosp-11-arm64` … `aosp-15-arm64`），镜像文件本体不随 git/安装包分发。程序内置 4 条镜像源（`resource/image_sources.json`，国内 2 + 海外 2），全局设置「镜像源」可选：
+
+| 区域 | 源 | 地址 |
+| --- | --- | --- |
+| 国内 | ghfast.top（GitHub 加速） | `https://ghfast.top/https://github.com/SongLiKod/stararm-emulator-windows/releases/download/images` |
+| 国内 | hf-mirror.com（HuggingFace 镜像） | `https://hf-mirror.com/datasets/SongLiKod/stararm-images/resolve/main` |
+| 海外 | GitHub Releases（官方） | `https://github.com/SongLiKod/stararm-emulator-windows/releases/download/images` |
+| 海外 | Hugging Face（官方） | `https://huggingface.co/datasets/SongLiKod/stararm-images/resolve/main` |
+
+- 包体约定：`<镜像源>/aosp-13-arm64.zip`（zip 内含 `image.json`、`Image`、`system.img` 等，ARM64）。
+- 默认「自动」：按国内优先顺序逐源尝试、失败自动回退，全部失败时给出逐源原因；设置里可固定某一条或填自定义 URL，并可「检测该源」在线确认是否已有镜像包（200 / 404 / 无法连接）。
+- 发布镜像（发布一次即对相应源生效；镜像目录须含 `image.json`，位于镜像制作流水线/制品目录）：
+  ```powershell
+  ./build/publish_images.ps1 -ImageDir <本地镜像目录>   # 打包 + 上传 GitHub Release「images」(+ 可选 HuggingFace)
+  ./build/publish_images.ps1 -ImageDir <本地镜像目录> -ZipOnly   # 只打包，先本地自测
+  ./build/fetch_images.ps1                              # 从当前源拉取到本地
+  ```
+  - GitHub 凭据：本机 git 凭据管理器（`github.com`/`SongLiKod` 可写 token）自动读取，无需额外配置。
+  - HuggingFace（`hf-mirror.com` / `huggingface.co` 两条源）：[新建 token](https://huggingface.co/settings/tokens)（勾选 **write**）→ `setx HF_TOKEN hf_xxx` → 重跑上面命令（或加 `-SkipHf` 跳过）；依赖 `pip install huggingface_hub`。
+
+三种获取方式：
+
+1. **内置源下载（GUI）**：新建实例 → 「下载所选内置镜像」（默认自动逐源尝试）。
+2. **命令行 / 脚本**：`stararm-cli download-image --image aosp-13-arm64`、`./build/fetch_images.ps1`（均读取同一套源设置）。
+3. **手动导入**：新建实例 → 「导入」，选择镜像 zip 或含 `image.json` 的目录（强制 ARM64 校验），导入后位于 `STARARM_HOME/mirror/images/`。
+
+未选择镜像源或源暂无镜像包时，界面给出可读提示与逐源状态，而不是抛出原始异常栈。
+
 ## 打包部署
 
 ```powershell
