@@ -60,6 +60,8 @@ Actions → **build-image** → `Run workflow`：
 | 串口 `Kernel panic: VFS: Unable to mount root fs` 或 `error -6` | NVMe 枚举失败：查 serial 中 `nvme`/`pci` 行；确认 `cmdline` 含 `root=/dev/nvme0n1 rootwait`、盘序 hd0=root |
 | 串口有 `nvme` 但无 adb（TCP 5555 不通） | usb-net 枚举失败 → 查 `xhci`/`cdc_ether` 行；或 `cdc_ether` 未在 `modules.load` 自动加载 → `adb shell lsmod`（需先串口诊断） |
 | `init: ...` 反复重启 | 看 `serial.log` 中 fstab/`/data` 报错；确认 `fstab.stararm` 已覆盖厂商 fstab |
+| 串口 `bootstrap-apexd-failed` 反复重启 | 同模块名重复 apex（camera HAL `fastscenecycle` 变体）→ `assemble.sh` 启动时去重 |
+| 串口 `reboot,boringssl-self-check-failed`（提示 label 为 `system_file`） | FC 汇总未生效 → `assemble.sh` 逐文件行数日志 + FC 内 boringssl 规则自检，`add_fc` 精确规则须排在兜底 `.*` 之前 |
 | 特权域被拒 | 保持 `androidboot.selinux=permissive`；后续可做 sepolicy 定制 |
 | zip 超 1.9GB | 增大 `PRUNE`（如 `system/media`、32 位库、预置 APK）后重建 |
 | 磁盘不足 | workflow 已在开头删除 Android SDK/dotnet 等（约 +15GB）；`assemble.sh` 会在解包后即时删除 `super`/`parts` |

@@ -209,10 +209,15 @@ log "汇总 file_contexts"
 FC="$WORK/combined_file_contexts"
 : > "$FC"
 # 只汇总文本 file_contexts；本构建 *_selinux_fc 指向 file_contexts.bin（二进制，混入会损坏规则）
+# 每文件后强制补一个换行（AOSP 构建同样强制插入），防止源文件缺尾换行时两文件首行粘连损坏规则
 while IFS= read -r f; do
   cat "$f" >> "$FC" || true
+  printf '\n' >> "$FC"
+  echo "    FC<= $f ($(grep -c '' "$f") 行)"
 done < <(find "$STAGING" -path '*/selinux/*file_contexts*' -type f ! -name '*.bin' 2>/dev/null | sort)
 [ -s "$FC" ] || log "  警告: 未找到 file_contexts（将以默认标签写入）"
+echo "    FC 内 boringssl 规则 $(grep -c 'bin/boringssl_self_test' "$FC") 条:"
+grep 'bin/boringssl_self_test' "$FC" | sed 's/^/    FC: /' || true
 
 # 组装根新增/改名的路径可能不在原 file_contexts 中；e2fsdroid 查不到标签会直接失败，
 # 按需补齐（同正则已存在则跳过，避免重复规则），最后加兜底规则。
@@ -228,6 +233,9 @@ add_fc '/fstab\\..*'            'u:object_r:rootfs:s0'
 add_fc '/system/etc/fstab\\..*' 'u:object_r:system_file:s0'
 add_fc '/init'                  'u:object_r:init_exec:s0'
 add_fc '/init\\..*'             'u:object_r:init_exec:s0'
+# 实测镜像内该二进制被打成 system_file 导致 init exec_start 门禁 reboot（boringssl-self-check-failed）；
+# 规则取自 system/sepolicy/private/file_contexts（android14-release），必须在兜底 .* 之前生效
+add_fc '/(vendor|system/vendor)/bin/boringssl_self_test(32|64)' 'u:object_r:vendor_boringssl_self_test_exec:s0'
 add_fc '.*'                     'u:object_r:system_file:s0'
 echo "[assemble]   file_contexts 规则数: $(grep -c '' "$FC")"
 
