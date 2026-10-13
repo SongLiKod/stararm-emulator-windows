@@ -29,8 +29,10 @@ fail() {
   echo "[boot-test] FAIL: $*" >&2
   echo "--- serial.log 尾部 ---"
   tail -n 150 "$SERIAL" 2>/dev/null || true
-  echo "--- panic/bug 扫描 ---"
-  grep -E -m 20 'Kernel panic|BUG:|Unable to handle|init: |sys.boot_completed' "$SERIAL" 2>/dev/null | tail -n 40 || true
+  echo "--- reboot 原因 ---"
+  grep -E 'Reboot start, reason|reboot: Restarting system' "$SERIAL" 2>/dev/null | tail -n 10 || true
+  echo "--- 关键行扫描 ---"
+  grep -E -m 30 'Kernel panic|BUG:|Unable to handle|Reboot start, reason|NULL VINTF|VINTF parse error|Abort message|Service .zygote. \(pid|STARARM_BOOT_COMPLETED|sys.boot_completed' "$SERIAL" 2>/dev/null | tail -n 60 || true
   echo "--- qemu.log 尾部 ---"
   tail -n 40 "$WORK/qemu.log" 2>/dev/null || true
   exit 1

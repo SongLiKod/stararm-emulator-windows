@@ -194,20 +194,38 @@ if [ -e "$STAGING/system/bin/recovery" ] || [ -e "$STAGING/sbin/recovery" ]; the
 fi
 rm -f "$STAGING/system/bin/recovery" "$STAGING/sbin/recovery"
 
-# CF 把设备侧 VINTF manifest 片段放进了 /system/etc/vintf/manifest（recovery-as-boot 布局），
-# 合并镜像后 framework manifest 解析报 "Cannot add a device manifest to a framework manifest"
-# （run 38392785443 实证）→ getFrameworkHalManifest 整体失败 → 框架 HAL 查询全乱。
-# 设备侧片段按 Treble 规则应位于 /vendor/etc/vintf/manifest。
-if ls "$STAGING/system/etc/vintf/manifest"/*.xml >/dev/null 2>&1; then
+# 实证（run 38405769614 serial 801–823s）：apexd.status=ready 后 exec_start boringssl_self_test_apex32
+# 找不到 /apex/com.android.conscrypt/bin/boringssl_self_test32（conscrypt apex 未含该二进制）→
+# reboot_on_failure 触发 reboot,boringssl-self-check-failed → 整机重启循环。
+# vendor 侧 early-init 自检与 /system/bin 自检均通过（serial 6–10s status 0），
+# 删除系统侧 rc（含必然失败的 apex 变体动作）；vendor rc（/vendor/etc/boringssl_self_test.*.rc）保留。
+if ls "$STAGING/system/etc/init/hw/init.boringssl"*.rc >/dev/null 2>&1; then
+  log "删除 init.boringssl*.rc（apex 内 boringssl_self_test32 不存在，apexd.status=ready 必触发重启）"
+fi
+rm -f "$STAGING/system/etc/init/hw/init.boringssl"*.rc
+
+# CF 把设备侧 VINTF HAL 片段放进了 /system/etc/vintf/manifest（recovery-as-boot 布局）。
+# run 38392785443 实证：framework manifest 报 "Cannot add a device manifest to a framework manifest"
+# （health-service.cuttlefish.xml 是设备侧声明）→ 只移动 android.hardware.* 片段到 vendor。
+# run 38405769614 实证（反例）：全量移动把框架侧片段（android.system.suspend-service.xml 等）
+# 也挪进 vendor → device manifest 报 "Cannot add a framework manifest to a device manifest"
+# → NULL VINTF MANIFEST: device → servicemanager 查不到任何设备 HAL →
+# zygote 每次启动 exit1 crash-loop（system_server 从未 fork）。
+SYS_MANIFEST="$STAGING/system/etc/vintf/manifest"
+if ls "$SYS_MANIFEST"/android.hardware.*.xml >/dev/null 2>&1; then
   mkdir -p "$STAGING/vendor/etc/vintf/manifest"
-  log "VINTF: system 侧设备 manifest 片段移至 vendor（修复 framework manifest 解析）"
-  mv "$STAGING/system/etc/vintf/manifest"/*.xml "$STAGING/vendor/etc/vintf/manifest/"
+  log "VINTF: system 侧 android.hardware.* 片段移至 vendor（框架侧片段留在 system）"
+  mv "$SYS_MANIFEST"/android.hardware.*.xml "$STAGING/vendor/etc/vintf/manifest/"
 fi
 
-# 无 CF 宿主设备时必然失败、且会拖垮整机启动的 HAL 服务（run 38392785443 实证）：
-#   vendor.graphics.allocator exit(1) 连锁：onrestart→杀 SF→杀 zygote（"exited 4 times before
-#   boot completed"）；boot-service.default_recovery SIGABRT（impl_.Init）；system-suspend
-#   register -3 SIGABRT 且被 servicemanager 反复懒启动（每秒拉起拖慢 TCG）。
+# 无 CF 宿主设备时必然失败、且会拖垮整机启动的 HAL 服务 rc（serial 实证）：
+#   allocator.rc：service vendor.graphics.allocator = allocator-service.minigbm，
+#     exit(1) 级联 onrestart→杀 SF→杀 zygote（run 38392785443 "exited 4 times before boot completed"）
+#   hwc3.rc：service vendor.hwcomposer-3 = composer3-service.**ranchu**（emulator goldfish 合成器，
+#     需 goldfish_pipe，-M virt 无此设备 → Init 必失败 → onrestart 同级联）
+#   boot-service.default_recovery：SIGABRT(impl_.Init)
+# system-suspend 的 register -3 属框架 manifest 解析失败的下游（VINTF 修复后预期消失），其 rc
+# 在 APEX 内无法按文件停用，故不再 glob。
 # 仅删 rc 停用服务，二进制保留便于后续诊断。
 disable_rc() {
   find "$STAGING" -path '*/etc/init/*.rc' -name "$1" 2>/dev/null | while read -r rc; do
@@ -215,10 +233,9 @@ disable_rc() {
     rm -f "$rc"
   done
 }
-disable_rc '*graphics.allocator*'   'allocator 无 CF host 依赖，exit(1) 连锁杀 SF/zygote'
+disable_rc 'allocator.rc'            'minigbm allocator 无 CF host，exit(1) 级联杀 SF/zygote'
+disable_rc 'hwc3.rc'                 'ranchu composer 需 goldfish 设备，Init 必失败'
 disable_rc '*boot-service.default_recovery*' 'recovery bootctl SIGABRT(impl_.Init)'
-disable_rc '*system_suspend*'       'system-suspend register -3 SIGABRT'
-disable_rc '*suspend@1.0*'          'system-suspend(旧命名) SIGABRT'
 
 # 诊断：图形栈 rc/二进制与 VINTF 现状（下轮若仍卡 SF 可据此定位）
 log "诊断: 图形/合成器相关 rc"

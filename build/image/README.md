@@ -61,8 +61,10 @@ Actions → **build-image** → `Run workflow`：
 | 串口有 `nvme` 但无 adb（TCP 5555 不通） | QEMU usb-net 只讲 RNDIS、guest 无 `rndis_host`（`cdc_ether` 绑不上）→ 无 IP；`boot_test` 完成判定已改扫串口 `STARARM_BOOT_COMPLETED=1`，adb 仅作可选加速 |
 | `init: ...` 反复重启 | 看 `serial.log` 中 fstab/`/data` 报错；确认 `fstab.stararm` 已覆盖厂商 fstab |
 | 串口 `bootstrap-apexd-failed` 反复重启 | 同模块名重复 apex（camera HAL `fastscenecycle` 变体）→ `assemble.sh` 启动时去重 |
-| 串口 `reboot,boringssl-self-check-failed`（提示 label 为 `system_file`） | FC 汇总顺序问题：libselinux 反向扫描「最后一条匹配的 meta 规则获胜」，兜底 `.*` 必须置顶（`assemble.sh` 已改）；boringssl 用静态精确规则保底 |
+| 串口 `reboot,boringssl-self-check-failed` | 两种成因均已修：① FC 汇总顺序（libselinux 反向扫描「最后一条匹配的 meta 规则获胜」，兜底 `.*` 必须置顶，vendor boringssl 用静态精确规则）；② `apexd.status=ready` 后 apex 变体自检找 `/apex/com.android.conscrypt/bin/boringssl_self_test32` 不存在 → `init.boringssl*.rc` 已删 |
 | 串口 `reboot,apexd-failed`（apexd SIGABRT 于 `GetSessionsDir`，post-fs-data mkdir 报 EROFS） | /data 未挂载 → `mount_all` 必须写在 `init.${ro.hardware}.rc`（`assemble.sh` 已内置 `init.stararm.rc`）；另需删 `/system/bin/recovery` 防 `InRecovery()` 使默认 fstab 搜索失效 |
+| 串口 `Cannot add a device manifest to a framework manifest` / `Cannot add a framework manifest to a device manifest` + zygote 秒退 exit1 | VINTF 片段分两类：`android.hardware.*` 是设备侧（须在 vendor），其余（如 `android.system.suspend-service.xml`）是框架侧（须留在 system）；混放会导致一侧 manifest 解析整体失败（NULL VINTF）→ servicemanager 查不到 HAL → zygote crash-loop |
+| zygote 正常但 system_server 不起 / 长期无 `sys.boot_completed` | 现 CF 图形栈依赖宿主：composer3=**ranchu**（emulator goldfish 合成器，需 goldfish_pipe，`-M virt` 无）+ minigbm allocator 需 CF 属性/设备 → SF 等待 composer 永不注册 → WMS 阻塞在 SurfaceSession（调查中：QEMU `android-emulator` 机型是否可用） |
 | 特权域被拒 | 保持 `androidboot.selinux=permissive`；后续可做 sepolicy 定制 |
 | zip 超 1.9GB | 增大 `PRUNE`（如 `system/media`、32 位库、预置 APK）后重建 |
 | 磁盘不足 | workflow 已在开头删除 Android SDK/dotnet 等（约 +15GB）；`assemble.sh` 会在解包后即时删除 `super`/`parts` |
