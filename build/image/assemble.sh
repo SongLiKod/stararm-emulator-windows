@@ -220,10 +220,15 @@ fi
 
 # 无 CF 宿主设备时必然失败、且会拖垮整机启动的 HAL 服务 rc（serial 实证）：
 #   allocator.rc：service vendor.graphics.allocator = allocator-service.minigbm，
-#     exit(1) 级联 onrestart→杀 SF→杀 zygote（run 38392785443 "exited 4 times before boot completed"）
-#   hwc3.rc：service vendor.hwcomposer-3 = composer3-service.**ranchu**（emulator goldfish 合成器，
-#     需 goldfish_pipe，-M virt 无此设备 → Init 必失败 → onrestart 同级联）
-#   boot-service.default_recovery：SIGABRT(impl_.Init)
+#     内核实证无任何可用 DRM 后端（# CONFIG_DRM_VIRTIO_GPU/VGEM/VKMS/PL111 is not set、
+#     # CONFIG_VIRTIO_PCI is not set）→ minigbm 打不开 /dev/dri 必 exit(1)
+#     → onrestart 级联杀 SF→zygote（run 38392785443 "exited 4 times before boot completed"）
+#   *boot-service*：SIGABRT(impl_.Init) ×495（run 712eb10，无 boot 分区设备）
+#   *gatekeeper-service.remote* / *oemlock-service.remote*：连接失败 ×411/×454（宿主侧依赖）
+#   *keymint-service.rust*：SIGABRT 打开 /dev/hvc11 失败（CF 宿主 virtio-console 通道，
+#     内核 # CONFIG_VIRTIO_CONSOLE is not set → 永不可用）
+# hwc3.rc（ranchu composer）本轮恢复启用：run 712eb10 实证 device VINTF 已修复
+# （"Found ... in device VINTF manifest"），验证 ranchu 早先 SIGABRT 是否为注册被拒。
 # system-suspend 的 register -3 属框架 manifest 解析失败的下游（VINTF 修复后预期消失），其 rc
 # 在 APEX 内无法按文件停用，故不再 glob。
 # 仅删 rc 停用服务，二进制保留便于后续诊断。
@@ -233,9 +238,33 @@ disable_rc() {
     rm -f "$rc"
   done
 }
-disable_rc 'allocator.rc'            'minigbm allocator 无 CF host，exit(1) 级联杀 SF/zygote'
-disable_rc 'hwc3.rc'                 'ranchu composer 需 goldfish 设备，Init 必失败'
-disable_rc '*boot-service.default_recovery*' 'recovery bootctl SIGABRT(impl_.Init)'
+disable_rc 'allocator.rc'            'minigbm 需 /dev/dri（内核无 DRM 后端），exit(1) 级联杀 SF/zygote'
+disable_rc '*boot-service*'          'boot HAL impl_.Init SIGABRT ×495（无 boot 分区设备）'
+disable_rc '*gatekeeper-service.remote*' '宿主侧 gatekeeper 连接失败 ×411'
+disable_rc '*oemlock-service.remote*'    '宿主侧 oemlock 连接失败 ×454'
+disable_rc '*keymint-service.rust*'  '需 /dev/hvc11 宿主通道（内核无 VIRTIO_CONSOLE）'
+
+# minigbm gralloc4 栈一致性剥离：allocator 已停，留着 mapper.minigbm 会让
+# Gralloc4Mapper(passthrough) 加载 minigbm 后与 gralloc0 分配器句柄不匹配 → 必崩。
+# 剥离后 libui 按版本链回退（Gralloc4→3→2…），目标落到软件 gralloc0
+# /vendor/lib64/hw/gralloc.default.so（vendor 清单实证存在，纯软件无硬件依赖）。
+for f in "$STAGING/vendor/lib64/hw/mapper.minigbm.so" \
+         "$STAGING/vendor/lib/hw/mapper.minigbm.so" \
+         "$STAGING/vendor/lib64/hw/android.hardware.graphics.mapper@4.0-impl.minigbm.so" \
+         "$STAGING/vendor/lib/hw/android.hardware.graphics.mapper@4.0-impl.minigbm.so"; do
+  if [ -e "$f" ]; then
+    log "剥离 minigbm mapper（回退软件 gralloc0）: $f"
+    rm -f "$f"
+  fi
+done
+
+# 诊断：EGL/Vulkan/gralloc/mapper/allocator 文件全分区清单（libEGL_mesa 是否存在、
+# mapper@2/3 与 allocator@2 default stub 是否在 system 分区 —— 决定下轮图形栈方向）
+log "诊断: EGL/Vulkan/gralloc/mapper/allocator 文件"
+find "$STAGING" \( -path '*/egl/libEGL*' -o -path '*/egl/libGLES*' -o -name 'libvulkan*.so' \
+  -o -name 'vulkan.*.so' -o -name '*swiftshader*' -o -name '*lavapipe*' -o -name '*mesa*' \
+  -o -name 'gralloc*' -o -name 'mapper*' -o -name 'android.hardware.graphics.mapper*' \
+  -o -name 'android.hardware.graphics.allocator*' \) 2>/dev/null | head -60
 
 # 诊断：图形栈 rc/二进制与 VINTF 现状（下轮若仍卡 SF 可据此定位）
 log "诊断: 图形/合成器相关 rc"
