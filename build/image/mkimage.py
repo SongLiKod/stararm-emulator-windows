@@ -15,12 +15,15 @@ from pathlib import Path
 # 与 core/qemu_manager.py build_args 契约一致的默认启动参数
 # （内核内置配置无 virtio/DRM → NVMe 根盘 + rootwait；
 #  printk.devkmsg=on 解除 userspace 日志 ratelimit，供排查 apexd/init 卡点；
-#  图形属性 = google/android-cuttlefish qemu_manager.cpp ConfigureGraphics DrmVirgl 模式：
-#  gralloc=minigbm + egl=mesa + hwcomposer=ranchu + finder=drm；
-#  /dev/dri 由 vendor_dlkm 的 vkms.ko 提供（init.stararm.rc post-fs modprobe，
-#  CF 设备内核模块随镜像发布，run fd3746a 实证 mesa eglGetDisplay 已通、差 DRM 设备）。
-#  实证链：712eb10 无属性→EGL not found；fd3746a egl=mesa+gralloc=default→
-#  chooseEglConfig 0 configs → 本轮 vkms+minigbm 补齐 DrmVirgl 配方。）
+#  图形属性基线 = google/android-cuttlefish qemu_manager.cpp ConfigureGraphics，
+#  /dev/dri 由 vendor_dlkm 的 vkms.ko 提供（init.stararm.rc post-fs modprobe）。
+#  实证链：712eb10 无属性→EGL not found；fd3746a egl=mesa 无 /dev/dri→0 configs；
+#  7e16fa6 vkms 已加载（[drm] Initialized vkms）+ minigbm allocator 正常开 /dev/dri/card0、
+#  ranchu 已探测 vkms uevent，但 mesa 仍 0 configs → mesa(android) 需 virgl/venus Gallium
+#  驱动（CF DrmVirgl=宿主 virgl），纯软 vkms 无 3D 驱动 → mesa 死路。
+#  本轮改 egl=angle（CF GuestSwiftshader 同款：ANGLE GLES-on-Vulkan + 客户机原生
+#  swiftshader/lavapipe ICD，无宿主依赖）；ICD 是否在镜像内由 init.stararm.rc
+#  串口探针核实（ls /system/etc/vulkan/icd.d 等 → /dev/console）。
 DEFAULT_CMDLINE = (
     "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw printk.devkmsg=on "
     "androidboot.hardware=stararm "
@@ -30,7 +33,7 @@ DEFAULT_CMDLINE = (
     "androidboot.hardware.hwcomposer=ranchu "
     "androidboot.hardware.hwcomposer.mode=client "
     "androidboot.hardware.hwcomposer.display_finder_mode=drm "
-    "androidboot.hardware.egl=mesa "
+    "androidboot.hardware.egl=angle "
     "androidboot.opengles.version=196608 "
     "androidboot.cpuvulkan.version=0"
 )

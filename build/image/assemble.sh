@@ -182,9 +182,14 @@ on post-fs
     # run fd3746a 实证：mesa EGL 已能 eglGetDisplay/Initialize，但 chooseConfig 0 configs
     # （无 /dev/dri → android 平台 EGL 不提供 RECORDABLE/FRAMEBUFFER_TARGET 配置）。
     # vendor_dlkm 自带 vkms.ko（纯软 DRM，虚拟 connector + dumb buffer，无硬件依赖）。
-    # 加载后走 CF DrmVirgl 完整配方（qemu_manager.cpp）：gralloc=minigbm + egl=mesa +
-    # hwcomposer=ranchu + finder=drm 全部可用（本根为合并分区，/vendor_dlkm 即目录无需挂载）。
+    # run 7e16fa6 实证 vkms 加载成功（[drm] Initialized vkms）+ minigbm allocator 正常，
+    # 但 mesa(android) 需 virgl/venus Gallium 驱动 → 纯软 vkms 无 3D → mesa 0 configs 死路。
     exec -- /system/bin/modprobe -d /vendor_dlkm/lib/modules vkms
+    # 串口探针（实证 system 分区 EGL/Vulkan ICD 文件清单——find 诊断曾被 head 截断）：
+    exec -- /system/bin/sh -c "ls -la /dev/dri > /dev/console 2>&1"
+    exec -- /system/bin/sh -c "ls -la /system/lib64/egl /vendor/lib64/egl /system_ext/lib64/egl /product/lib64/egl > /dev/console 2>&1"
+    exec -- /system/bin/sh -c "ls -la /system/etc/vulkan/icd.d /vendor/etc/vulkan/icd.d > /dev/console 2>&1"
+    exec -- /system/bin/sh -c "ls -la /system/lib64/libvk* /system/lib64/vulkan.*.so /vendor/lib64/libvk* /vendor/lib64/vulkan.*.so /system_ext/lib64/libvk* /product/lib64/libvk* > /dev/console 2>&1"
 
 on late-fs
     mount_all /fstab.stararm --late
@@ -253,13 +258,15 @@ disable_rc '*gatekeeper-service.remote*' '宿主侧 gatekeeper 连接失败 ×41
 disable_rc '*oemlock-service.remote*'    '宿主侧 oemlock 连接失败 ×454'
 disable_rc '*keymint-service.rust*'  '需 /dev/hvc11 宿主通道（内核无 VIRTIO_CONSOLE 亦无对应模块）'
 
-# 诊断：EGL/Vulkan/gralloc/mapper/allocator 文件全分区清单（libEGL_mesa 是否存在、
-# mapper@2/3 与 allocator@2 default stub 是否在 system 分区 —— 决定下轮图形栈方向）
+# 诊断：EGL/Vulkan/gralloc/mapper/allocator 文件全分区清单（run fd3746a head-60 截断于
+# system/lib —— 本轮扩到 300 并补 vulkan ICD json/libvk*；运行时真相以 init.stararm.rc
+# 串口探针为准）
 log "诊断: EGL/Vulkan/gralloc/mapper/allocator 文件"
 find "$STAGING" \( -path '*/egl/libEGL*' -o -path '*/egl/libGLES*' -o -name 'libvulkan*.so' \
-  -o -name 'vulkan.*.so' -o -name '*swiftshader*' -o -name '*lavapipe*' -o -name '*mesa*' \
+  -o -name 'vulkan.*.so' -o -name 'libvk*' -o -path '*/vulkan/*' -o -name '*swiftshader*' \
+  -o -name '*lavapipe*' -o -name '*lvp*' -o -name '*mesa*' \
   -o -name 'gralloc*' -o -name 'mapper*' -o -name 'android.hardware.graphics.mapper*' \
-  -o -name 'android.hardware.graphics.allocator*' \) 2>/dev/null | head -60
+  -o -name 'android.hardware.graphics.allocator*' \) 2>/dev/null | head -300
 
 # 诊断：图形栈 rc/二进制与 VINTF 现状（下轮若仍卡 SF 可据此定位）
 log "诊断: 图形/合成器相关 rc"
