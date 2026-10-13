@@ -4,14 +4,16 @@
 # 内核 ikconfig 实证无 virtio 驱动（# CONFIG_VIRTIO_BLK/_NET/_MMIO is not set）：
 #   根盘/数据盘 = NVMe（CONFIG_BLK_DEV_NVME=y），根盘为只读基盘的 CoW qcow2
 #   （ext4 挂载需写超级块，readonly 盘会被 QEMU 拒写 EPERM），
-#   网卡 = qemu-xhci + usb-net（CDC ECM，guest 端 cdc_ether/usbnet 在 system_dlkm），
-#   无 virtio-gpu/rng 设备（后端无驱动，忽略）。
+#   网卡 = qemu-xhci + usb-net（实测 QEMU usb-net 只讲 RNDIS，guest 无 rndis_host，
+#   cdc_ether 绑不上 → 无 IP → slirp hostfwd 到不了 guest，adb TCP 实际不可达；
+#   完成判定改为扫串口 STARARM_BOOT_COMPLETED=1（init.stararm.rc 于 sys.boot_completed=1 时写入），
+#   adb 保留为加速通道但不作为必要条件），无 virtio-gpu/rng 设备（后端无驱动，忽略）。
 # 产物: $WORK/serial.log（内核/init 日志）、$WORK/qemu.log、$WORK/boot-test-*.txt
 set -euo pipefail
 
 DIST="${DIST:-dist}"
 WORK="${WORK:-.work}"
-BOOT_TIMEOUT="${BOOT_TIMEOUT:-2400}"   # TCG 下 Android 启动可能超过 20 分钟
+BOOT_TIMEOUT="${BOOT_TIMEOUT:-3600}"   # TCG 首启含 dexopt，实测 2400s 不够（run 38392785443 跑满未完成）
 MEM_MB="${MEM_MB:-3072}"
 SMP="${SMP:-4}"
 ADB_PORT="${ADB_PORT:-5555}"
@@ -73,6 +75,18 @@ log "qemu pid=$QPID，超时 ${BOOT_TIMEOUT}s"
 deadline=$(( $(date +%s) + BOOT_TIMEOUT ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
   kill -0 "$QPID" 2>/dev/null || fail "qemu 提前退出（检查 kernel/驱动/启动参数）"
+  # 主判定：串口标记（init.stararm.rc 于 sys.boot_completed=1 写入；usb-net RNDIS 不可用，adb 通常不可达）
+  if grep -q 'STARARM_BOOT_COMPLETED=1' "$SERIAL" 2>/dev/null; then
+    log "启动成功: serial 出现 STARARM_BOOT_COMPLETED=1"
+    "$ADB" connect "127.0.0.1:${ADB_PORT}" >/dev/null 2>&1 || true
+    "$ADB" -s "127.0.0.1:${ADB_PORT}" shell getprop ro.build.fingerprint 2>/dev/null \
+      | tr -d '\r' | tee "$WORK/boot-fingerprint.txt" || true
+    kill "$QPID" 2>/dev/null || true
+    wait "$QPID" 2>/dev/null || true
+    trap - EXIT
+    log "serial 日志: $SERIAL"
+    exit 0
+  fi
   "$ADB" connect "127.0.0.1:${ADB_PORT}" >/dev/null 2>&1 || true
   state=$("$ADB" -s "127.0.0.1:${ADB_PORT}" shell getprop sys.boot_completed 2>/dev/null \
     | tr -d '\r' || true)

@@ -58,7 +58,7 @@ Actions → **build-image** → `Run workflow`：
 | 症状 | 方向 |
 | --- | --- |
 | 串口 `Kernel panic: VFS: Unable to mount root fs` 或 `error -6` | NVMe 枚举失败：查 serial 中 `nvme`/`pci` 行；确认 `cmdline` 含 `root=/dev/nvme0n1 rootwait`、盘序 hd0=root |
-| 串口有 `nvme` 但无 adb（TCP 5555 不通） | usb-net 枚举失败 → 查 `xhci`/`cdc_ether` 行；或 `cdc_ether` 未在 `modules.load` 自动加载 → `adb shell lsmod`（需先串口诊断） |
+| 串口有 `nvme` 但无 adb（TCP 5555 不通） | QEMU usb-net 只讲 RNDIS、guest 无 `rndis_host`（`cdc_ether` 绑不上）→ 无 IP；`boot_test` 完成判定已改扫串口 `STARARM_BOOT_COMPLETED=1`，adb 仅作可选加速 |
 | `init: ...` 反复重启 | 看 `serial.log` 中 fstab/`/data` 报错；确认 `fstab.stararm` 已覆盖厂商 fstab |
 | 串口 `bootstrap-apexd-failed` 反复重启 | 同模块名重复 apex（camera HAL `fastscenecycle` 变体）→ `assemble.sh` 启动时去重 |
 | 串口 `reboot,boringssl-self-check-failed`（提示 label 为 `system_file`） | FC 汇总顺序问题：libselinux 反向扫描「最后一条匹配的 meta 规则获胜」，兜底 `.*` 必须置顶（`assemble.sh` 已改）；boringssl 用静态精确规则保底 |

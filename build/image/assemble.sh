@@ -180,8 +180,11 @@ done
 cat > "$STAGING/init.stararm.rc" <<'EOF'
 on late-fs
     mount_all /fstab.stararm --late
+
+on property:sys.boot_completed=1
+    write /dev/console STARARM_BOOT_COMPLETED=1
 EOF
-log "已写入 /init.stararm.rc（late-fs 挂载 /data，latemount 条目由 mount_all --late 处理）"
+log "已写入 /init.stararm.rc（late-fs 挂载 /data + boot_completed 串口标记）"
 # libfstab InRecovery() 只探测 /system/bin/recovery 或 /sbin/recovery 是否存在；存在则所有
 # ReadDefaultFstab 走 /etc/recovery.fstab 并落空（实证 run 38325957483 19.09s 日志：
 # "failed to load fstab from : '/etc/recovery.fstab'" + "failed to find device default fstab"）。
@@ -190,6 +193,42 @@ if [ -e "$STAGING/system/bin/recovery" ] || [ -e "$STAGING/sbin/recovery" ]; the
   log "删除 recovery 二进制（避免 InRecovery() 误判导致默认 fstab 搜索失效）"
 fi
 rm -f "$STAGING/system/bin/recovery" "$STAGING/sbin/recovery"
+
+# CF 把设备侧 VINTF manifest 片段放进了 /system/etc/vintf/manifest（recovery-as-boot 布局），
+# 合并镜像后 framework manifest 解析报 "Cannot add a device manifest to a framework manifest"
+# （run 38392785443 实证）→ getFrameworkHalManifest 整体失败 → 框架 HAL 查询全乱。
+# 设备侧片段按 Treble 规则应位于 /vendor/etc/vintf/manifest。
+if ls "$STAGING/system/etc/vintf/manifest"/*.xml >/dev/null 2>&1; then
+  mkdir -p "$STAGING/vendor/etc/vintf/manifest"
+  log "VINTF: system 侧设备 manifest 片段移至 vendor（修复 framework manifest 解析）"
+  mv "$STAGING/system/etc/vintf/manifest"/*.xml "$STAGING/vendor/etc/vintf/manifest/"
+fi
+
+# 无 CF 宿主设备时必然失败、且会拖垮整机启动的 HAL 服务（run 38392785443 实证）：
+#   vendor.graphics.allocator exit(1) 连锁：onrestart→杀 SF→杀 zygote（"exited 4 times before
+#   boot completed"）；boot-service.default_recovery SIGABRT（impl_.Init）；system-suspend
+#   register -3 SIGABRT 且被 servicemanager 反复懒启动（每秒拉起拖慢 TCG）。
+# 仅删 rc 停用服务，二进制保留便于后续诊断。
+disable_rc() {
+  find "$STAGING" -path '*/etc/init/*.rc' -name "$1" 2>/dev/null | while read -r rc; do
+    log "停用 ($2): $rc"
+    rm -f "$rc"
+  done
+}
+disable_rc '*graphics.allocator*'   'allocator 无 CF host 依赖，exit(1) 连锁杀 SF/zygote'
+disable_rc '*boot-service.default_recovery*' 'recovery bootctl SIGABRT(impl_.Init)'
+disable_rc '*system_suspend*'       'system-suspend register -3 SIGABRT'
+disable_rc '*suspend@1.0*'          'system-suspend(旧命名) SIGABRT'
+
+# 诊断：图形栈 rc/二进制与 VINTF 现状（下轮若仍卡 SF 可据此定位）
+log "诊断: 图形/合成器相关 rc"
+find "$STAGING" -path '*/etc/init/*.rc' 2>/dev/null | xargs grep -lEi 'graphics|composer|surfaceflinger' 2>/dev/null | while read -r rc; do
+  echo "=== RC $rc ==="; cat "$rc"
+done || true
+log "诊断: hw 二进制"
+ls "$STAGING/system/bin/hw" "$STAGING/vendor/bin/hw" 2>/dev/null | grep -iE 'graphics|composer|allocator|health|boot-service|suspend' || true
+log "诊断: VINTF manifest 目录"
+ls "$STAGING/system/etc/vintf/manifest" "$STAGING/vendor/etc/vintf/manifest" 2>/dev/null || true
 
 # apexd-bootstrap 同模块名去重（CI serial 实证：/vendor/apex 下 camera HAL 两个变体
 # 同模块名 com.google.emulated.camera.provider.hal → apexd SIGABRT → bootstrap-apexd-failed）
