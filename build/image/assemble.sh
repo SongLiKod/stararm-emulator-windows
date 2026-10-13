@@ -227,6 +227,33 @@ if ls "$STAGING/system/etc/init/hw/init.boringssl"*.rc >/dev/null 2>&1; then
 fi
 rm -f "$STAGING/system/etc/init/hw/init.boringssl"*.rc
 
+# ---- Vulkan ICD 注入（run 8fa65e9 探针实证后的定案）----
+# 8fa65e9 串口探针完整清单实证：
+#   /system/lib64/egl、/system_ext|product/lib64/egl 均不存在（system 分区无 EGL 库）
+#   /system|/vendor/etc/vulkan/icd.d 均不存在（无任何 ICD json）
+#   /vendor/lib64/egl 仅 angle/emulation/mesa 壳（libGLESv2_angle 8.6MB，无 mesa 驱动后端）
+#   /vendor/lib64/hw 有 vulkan.pastel.so（28.9MB，CF GuestSwiftshader 同款纯软 ICD）
+#     与 vulkan.ranchu.so（135KB，需宿主 virgl）—— 但无 icd.d json → ANGLE 自带 loader
+#     扫不到任何 ICD → eglInitialize 过但 0 configs（fb6e4c8/8fa65e9 实证）。
+# 解法：① 把镜像自带 vulkan.pastel.so 用 icd.d json 暴露给 ANGLE loader；
+#       ② 注入本仓库预编译 libvk_swiftshader.so（NDK r26 + SwiftShader master 自建，
+#          纯 CPU JIT，无宿主依赖）作第二 ICD 兜底 —— loader 按文件名顺序尝试，
+#          pastel 失败则落 swiftshader。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PREBUILT="$SCRIPT_DIR/prebuilt"
+if [ -f "$PREBUILT/libvk_swiftshader.so" ]; then
+  mkdir -p "$STAGING/system/etc/vulkan/icd.d"
+  install -m 0644 "$PREBUILT/vulkan.pastel.icd.json" "$STAGING/system/etc/vulkan/icd.d/0000_pastel.json"
+  install -m 0644 "$PREBUILT/vulkan.swiftshader.icd.json" "$STAGING/system/etc/vulkan/icd.d/1000_swiftshader.json"
+  install -m 0644 "$PREBUILT/libvk_swiftshader.so" "$STAGING/system/lib64/libvk_swiftshader.so"
+  # libvulkan(hw 扫描) 与 ANGLE loader 双通道：hw 侧也放一份自建 ICD
+  mkdir -p "$STAGING/vendor/lib64/hw"
+  install -m 0644 "$PREBUILT/libvk_swiftshader.so" "$STAGING/vendor/lib64/hw/vulkan.swiftshader.so"
+  log "已注入 Vulkan ICD（pastel json + 自建 swiftshader 34.7MB → system/lib64 + vendor/hw）"
+else
+  die "缺少 prebuilt/libvk_swiftshader.so（SwiftShader arm64 自建产物）"
+fi
+
 # CF 把设备侧 VINTF HAL 片段放进了 /system/etc/vintf/manifest（recovery-as-boot 布局）。
 # run 38392785443 实证：framework manifest 报 "Cannot add a device manifest to a framework manifest"
 # （health-service.cuttlefish.xml 是设备侧声明）→ 只移动 android.hardware.* 片段到 vendor。

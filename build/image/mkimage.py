@@ -24,6 +24,10 @@ from pathlib import Path
 #  本轮改 egl=angle（CF GuestSwiftshader 同款：ANGLE GLES-on-Vulkan + 客户机原生
 #  swiftshader/lavapipe ICD，无宿主依赖）；ICD 是否在镜像内由 init.stararm.rc
 #  串口探针核实（ls /system/etc/vulkan/icd.d 等 → /dev/console）。
+#  run 8fa65e9 探针定案：镜像无 icd.d json、system 无 egl 目录、无 swiftshader/apex ——
+#  但 /vendor/lib64/hw/vulkan.pastel.so（28.9MB，GuestSwiftshader 纯软 ICD）在镜像内，
+#  仅缺 json 暴露。assemble.sh 注入 pastel json + 自建 libvk_swiftshader.so（34.7MB，
+#  NDK r26 自建）双 ICD；cmdline 补 vulkan=pastel 与 CF GuestSwiftshader 配置对齐。
 DEFAULT_CMDLINE = (
     "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw printk.devkmsg=on "
     "androidboot.hardware=stararm "
@@ -34,6 +38,7 @@ DEFAULT_CMDLINE = (
     "androidboot.hardware.hwcomposer.mode=client "
     "androidboot.hardware.hwcomposer.display_finder_mode=drm "
     "androidboot.hardware.egl=angle "
+    "androidboot.hardware.vulkan=pastel "
     "androidboot.opengles.version=196608 "
     "androidboot.cpuvulkan.version=0"
 )
