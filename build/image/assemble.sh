@@ -184,12 +184,22 @@ on post-fs
     # vendor_dlkm 自带 vkms.ko（纯软 DRM，虚拟 connector + dumb buffer，无硬件依赖）。
     # run 7e16fa6 实证 vkms 加载成功（[drm] Initialized vkms）+ minigbm allocator 正常，
     # 但 mesa(android) 需 virgl/venus Gallium 驱动 → 纯软 vkms 无 3D → mesa 0 configs 死路。
+    # run fb6e4c8 实证 egl=angle 同样 0 configs（ANGLE eglInitialize 已过，疑无可用
+    # Vulkan ICD 或 vendor goldfish ANGLE 缺 android RECORDABLE/FRAMEBUFFER_TARGET 属性）。
     exec -- /system/bin/modprobe -d /vendor_dlkm/lib/modules vkms
-    # 串口探针（实证 system 分区 EGL/Vulkan ICD 文件清单——find 诊断曾被 head 截断）：
-    exec -- /system/bin/sh -c "ls -la /dev/dri > /dev/console 2>&1"
-    exec -- /system/bin/sh -c "ls -la /system/lib64/egl /vendor/lib64/egl /system_ext/lib64/egl /product/lib64/egl > /dev/console 2>&1"
-    exec -- /system/bin/sh -c "ls -la /system/etc/vulkan/icd.d /vendor/etc/vulkan/icd.d > /dev/console 2>&1"
-    exec -- /system/bin/sh -c "ls -la /system/lib64/libvk* /system/lib64/vulkan.*.so /vendor/lib64/libvk* /vendor/lib64/vulkan.*.so /system_ext/lib64/libvk* /product/lib64/libvk* > /dev/console 2>&1"
+
+# 串口探针（fb6e4c8 实证：init exec sh 因 shell_exec 无 init 域转移而失败；
+# 改 service console + toybox（toolbox 域，与 modprobe 同域已验证可跑）→ 输出进 /dev/console）。
+# 目的：EGL/Vulkan ICD 文件真实清单（find 诊断曾截断）+ 未挂载 apex 文件排查。
+service stararm.probe /system/bin/toybox ls -la /dev/dri /system/lib64/egl /vendor/lib64/egl /system_ext/lib64/egl /product/lib64/egl /system/etc/vulkan/icd.d /vendor/etc/vulkan/icd.d /vendor/lib64/hw /system/apex /system_ext/apex /vendor/apex /product/apex
+    class core
+    user root
+    group root
+    oneshot
+    console
+
+on post-fs-data
+    start stararm.probe
 
 on late-fs
     mount_all /fstab.stararm --late
@@ -267,6 +277,9 @@ find "$STAGING" \( -path '*/egl/libEGL*' -o -path '*/egl/libGLES*' -o -name 'lib
   -o -name '*lavapipe*' -o -name '*lvp*' -o -name '*mesa*' \
   -o -name 'gralloc*' -o -name 'mapper*' -o -name 'android.hardware.graphics.mapper*' \
   -o -name 'android.hardware.graphics.allocator*' \) 2>/dev/null | head -300
+
+log "诊断: 全部 apex 文件（排查 angle/swiftshader apex 是否存在但未挂载）"
+find "$STAGING" -name '*.apex' 2>/dev/null | sed "s|$STAGING||" | head -80
 
 # 诊断：图形栈 rc/二进制与 VINTF 现状（下轮若仍卡 SF 可据此定位）
 log "诊断: 图形/合成器相关 rc"
