@@ -173,6 +173,23 @@ for dest in "$STAGING/fstab.stararm" "$STAGING/system/etc/fstab.stararm"; do
     '/dev/nvme1n1 /data      ext4   defaults     wait,formattable,check,latemount' \
     > "$dest"
 done
+# AOSP system/core/rootdir/init.rc 只有 import /init.${ro.hardware}.rc，mount_all 必须由
+# 设备专属 rc 执行（init.rc 注释原话："Mount fstab in init.{$device}.rc by mount_all command"）。
+# 实证（run 38325957483）：缺 init.stararm.rc → mount_all 从未执行 → /data 从未挂载 →
+# post-fs-data mkdir 全部 EROFS → apexd GetSessionsDir() CHECK 失败 SIGABRT → reboot,apexd-failed。
+cat > "$STAGING/init.stararm.rc" <<'EOF'
+on late-fs
+    mount_all /fstab.stararm --late
+EOF
+log "已写入 /init.stararm.rc（late-fs 挂载 /data，latemount 条目由 mount_all --late 处理）"
+# libfstab InRecovery() 只探测 /system/bin/recovery 或 /sbin/recovery 是否存在；存在则所有
+# ReadDefaultFstab 走 /etc/recovery.fstab 并落空（实证 run 38325957483 19.09s 日志：
+# "failed to load fstab from : '/etc/recovery.fstab'" + "failed to find device default fstab"）。
+# 本镜像不做 recovery 模式，删除该二进制恢复默认 fstab 搜索（/system/etc/fstab.stararm 可被找到）。
+if [ -e "$STAGING/system/bin/recovery" ] || [ -e "$STAGING/sbin/recovery" ]; then
+  log "删除 recovery 二进制（避免 InRecovery() 误判导致默认 fstab 搜索失效）"
+fi
+rm -f "$STAGING/system/bin/recovery" "$STAGING/sbin/recovery"
 
 # apexd-bootstrap 同模块名去重（CI serial 实证：/vendor/apex 下 camera HAL 两个变体
 # 同模块名 com.google.emulated.camera.provider.hal → apexd SIGABRT → bootstrap-apexd-failed）
