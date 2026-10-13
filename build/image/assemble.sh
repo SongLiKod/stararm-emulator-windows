@@ -178,13 +178,21 @@ done
 # 实证（run 38325957483）：缺 init.stararm.rc → mount_all 从未执行 → /data 从未挂载 →
 # post-fs-data mkdir 全部 EROFS → apexd GetSessionsDir() CHECK 失败 SIGABRT → reboot,apexd-failed。
 cat > "$STAGING/init.stararm.rc" <<'EOF'
+on post-fs
+    # run fd3746a 实证：mesa EGL 已能 eglGetDisplay/Initialize，但 chooseConfig 0 configs
+    # （无 /dev/dri → android 平台 EGL 不提供 RECORDABLE/FRAMEBUFFER_TARGET 配置）。
+    # vendor_dlkm 自带 vkms.ko（纯软 DRM，虚拟 connector + dumb buffer，无硬件依赖）。
+    # 加载后走 CF DrmVirgl 完整配方（qemu_manager.cpp）：gralloc=minigbm + egl=mesa +
+    # hwcomposer=ranchu + finder=drm 全部可用（本根为合并分区，/vendor_dlkm 即目录无需挂载）。
+    exec -- /system/bin/modprobe -d /vendor_dlkm/lib/modules vkms
+
 on late-fs
     mount_all /fstab.stararm --late
 
 on property:sys.boot_completed=1
     write /dev/console STARARM_BOOT_COMPLETED=1
 EOF
-log "已写入 /init.stararm.rc（late-fs 挂载 /data + boot_completed 串口标记）"
+log "已写入 /init.stararm.rc（post-fs 加载 vkms 软 DRM + late-fs 挂载 /data + boot_completed 串口标记）"
 # libfstab InRecovery() 只探测 /system/bin/recovery 或 /sbin/recovery 是否存在；存在则所有
 # ReadDefaultFstab 走 /etc/recovery.fstab 并落空（实证 run 38325957483 19.09s 日志：
 # "failed to load fstab from : '/etc/recovery.fstab'" + "failed to find device default fstab"）。
@@ -218,17 +226,16 @@ if ls "$SYS_MANIFEST"/android.hardware.*.xml >/dev/null 2>&1; then
   mv "$SYS_MANIFEST"/android.hardware.*.xml "$STAGING/vendor/etc/vintf/manifest/"
 fi
 
-# 无 CF 宿主设备时必然失败、且会拖垮整机启动的 HAL 服务 rc（serial 实证）：
-#   allocator.rc：service vendor.graphics.allocator = allocator-service.minigbm，
-#     内核实证无任何可用 DRM 后端（# CONFIG_DRM_VIRTIO_GPU/VGEM/VKMS/PL111 is not set、
-#     # CONFIG_VIRTIO_PCI is not set）→ minigbm 打不开 /dev/dri 必 exit(1)
-#     → onrestart 级联杀 SF→zygote（run 38392785443 "exited 4 times before boot completed"）
+# 无 CF 宿主设备时必然失败、且会拖垮整机启动的 HAL 服务 rc（serial 实证）。
+# 背景更正（run fd3746a 后）：内核内置配置无 DRM 后端，但 vendor_dlkm **自带模块**
+# vkms.ko/pl111_drm.ko/goldfish_pipe.ko（CF 设备内核模块随镜像发布）——
+# vkms 纯软 DRM 已由 init.stararm.rc post-fs 加载 → minigbm/allocator 恢复启用。
 #   *boot-service*：SIGABRT(impl_.Init) ×495（run 712eb10，无 boot 分区设备）
 #   *gatekeeper-service.remote* / *oemlock-service.remote*：连接失败 ×411/×454（宿主侧依赖）
 #   *keymint-service.rust*：SIGABRT 打开 /dev/hvc11 失败（CF 宿主 virtio-console 通道，
-#     内核 # CONFIG_VIRTIO_CONSOLE is not set → 永不可用）
-# hwc3.rc（ranchu composer）本轮恢复启用：run 712eb10 实证 device VINTF 已修复
-# （"Found ... in device VINTF manifest"），验证 ranchu 早先 SIGABRT 是否为注册被拒。
+#     内核无 VIRTIO_CONSOLE 且 vendor_dlkm 无 virtio_console.ko → 永不可用）
+# hwc3.rc（ranchu composer）保持启用：run 712eb10 实证 device VINTF 修复后 ranchu 已能
+# 注册（fd3746a serial "Found ... composer3.IComposer/default in device VINTF"）。
 # system-suspend 的 register -3 属框架 manifest 解析失败的下游（VINTF 修复后预期消失），其 rc
 # 在 APEX 内无法按文件停用，故不再 glob。
 # 仅删 rc 停用服务，二进制保留便于后续诊断。
@@ -238,25 +245,13 @@ disable_rc() {
     rm -f "$rc"
   done
 }
-disable_rc 'allocator.rc'            'minigbm 需 /dev/dri（内核无 DRM 后端），exit(1) 级联杀 SF/zygote'
+# allocator.rc（minigbm）本轮恢复启用：vendor_dlkm 的 vkms.ko 提供 /dev/dri 软 DRM
+# （init.stararm.rc post-fs modprobe），minigbm generic GBM 路径可用（CF DrmVirgl 同款配方）。
+# minigbm mapper 不再剥离（gralloc4 栈恢复完整）。
 disable_rc '*boot-service*'          'boot HAL impl_.Init SIGABRT ×495（无 boot 分区设备）'
 disable_rc '*gatekeeper-service.remote*' '宿主侧 gatekeeper 连接失败 ×411'
 disable_rc '*oemlock-service.remote*'    '宿主侧 oemlock 连接失败 ×454'
-disable_rc '*keymint-service.rust*'  '需 /dev/hvc11 宿主通道（内核无 VIRTIO_CONSOLE）'
-
-# minigbm gralloc4 栈一致性剥离：allocator 已停，留着 mapper.minigbm 会让
-# Gralloc4Mapper(passthrough) 加载 minigbm 后与 gralloc0 分配器句柄不匹配 → 必崩。
-# 剥离后 libui 按版本链回退（Gralloc4→3→2…），目标落到软件 gralloc0
-# /vendor/lib64/hw/gralloc.default.so（vendor 清单实证存在，纯软件无硬件依赖）。
-for f in "$STAGING/vendor/lib64/hw/mapper.minigbm.so" \
-         "$STAGING/vendor/lib/hw/mapper.minigbm.so" \
-         "$STAGING/vendor/lib64/hw/android.hardware.graphics.mapper@4.0-impl.minigbm.so" \
-         "$STAGING/vendor/lib/hw/android.hardware.graphics.mapper@4.0-impl.minigbm.so"; do
-  if [ -e "$f" ]; then
-    log "剥离 minigbm mapper（回退软件 gralloc0）: $f"
-    rm -f "$f"
-  fi
-done
+disable_rc '*keymint-service.rust*'  '需 /dev/hvc11 宿主通道（内核无 VIRTIO_CONSOLE 亦无对应模块）'
 
 # 诊断：EGL/Vulkan/gralloc/mapper/allocator 文件全分区清单（libEGL_mesa 是否存在、
 # mapper@2/3 与 allocator@2 default stub 是否在 system 分区 —— 决定下轮图形栈方向）

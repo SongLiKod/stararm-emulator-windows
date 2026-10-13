@@ -13,20 +13,20 @@ import zipfile
 from pathlib import Path
 
 # 与 core/qemu_manager.py build_args 契约一致的默认启动参数
-# （内核 ikconfig 无 virtio 驱动 → NVMe 根盘 + rootwait；
+# （内核内置配置无 virtio/DRM → NVMe 根盘 + rootwait；
 #  printk.devkmsg=on 解除 userspace 日志 ratelimit，供排查 apexd/init 卡点；
-#  图形属性取自 google/android-cuttlefish qemu_manager.cpp ConfigureGraphics
-#  DrmVirgl/GuestLavapipe 模式（纯软渲染：egl=mesa llvmpipe，无需宿主 GPU；
-#  gralloc=default → /vendor/lib64/hw/gralloc.default.so 软件分配器，
-#  内核无 VIRTIO_PCI/DRM_VIRTIO_GPU/VGEM/VKMS/PL111 → minigbm/DRM 不可行）。
-#  实证 run 712eb10：ro.boot.* 属性缺失 → SF RenderEngine 报
-#  "couldn't find an OpenGL ES implementation" SIGABRT → 级联重启 zygote）
+#  图形属性 = google/android-cuttlefish qemu_manager.cpp ConfigureGraphics DrmVirgl 模式：
+#  gralloc=minigbm + egl=mesa + hwcomposer=ranchu + finder=drm；
+#  /dev/dri 由 vendor_dlkm 的 vkms.ko 提供（init.stararm.rc post-fs modprobe，
+#  CF 设备内核模块随镜像发布，run fd3746a 实证 mesa eglGetDisplay 已通、差 DRM 设备）。
+#  实证链：712eb10 无属性→EGL not found；fd3746a egl=mesa+gralloc=default→
+#  chooseEglConfig 0 configs → 本轮 vkms+minigbm 补齐 DrmVirgl 配方。）
 DEFAULT_CMDLINE = (
     "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw printk.devkmsg=on "
     "androidboot.hardware=stararm "
     "androidboot.selinux=permissive androidboot.vbmeta.device_state=unlocked "
     "androidboot.verifiedbootstate=orange "
-    "androidboot.hardware.gralloc=default "
+    "androidboot.hardware.gralloc=minigbm "
     "androidboot.hardware.hwcomposer=ranchu "
     "androidboot.hardware.hwcomposer.mode=client "
     "androidboot.hardware.hwcomposer.display_finder_mode=drm "
