@@ -28,15 +28,20 @@ from pathlib import Path
 #  但 /vendor/lib64/hw/vulkan.pastel.so（28.9MB，GuestSwiftshader 纯软 ICD）在镜像内，
 #  仅缺 json 暴露。assemble.sh 注入 pastel json + 自建 libvk_swiftshader.so（34.7MB，
 #  NDK r26 自建）双 ICD；cmdline 补 vulkan=pastel 与 CF GuestSwiftshader 配置对齐。
+#  run 41e94a7 实证：双 ICD 生效（EGL 错误全消失），SF 卡 "HWC did not hotplug" ——
+#  hwc3 读 ro.vendor.hwcomposer.*（本镜像缺 CF 的 init_graphics.vendor.rc 映射 → 走
+#  GuestFrameComposer 宿主路径）；且 mode=client 的 ClientFrameComposer 硬依赖
+#  DrmClient，DrmClient 只认 virtio-gpu（vkms 被拒）。定案 mode=noop + finder=noop：
+#  NoOpFrameComposer 零依赖 + 720x1280 占位显示器 → hotplug → SF ANGLE GL 合成。
 DEFAULT_CMDLINE = (
     "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw printk.devkmsg=on "
     "androidboot.hardware=stararm "
     "androidboot.selinux=permissive androidboot.vbmeta.device_state=unlocked "
     "androidboot.verifiedbootstate=orange "
     "androidboot.hardware.gralloc=minigbm "
-    "androidboot.hardware.hwcomposer=ranchu "
-    "androidboot.hardware.hwcomposer.mode=client "
-    "androidboot.hardware.hwcomposer.display_finder_mode=drm "
+    "androidboot.hardware.hwcomposer=noop "
+    "androidboot.hardware.hwcomposer.mode=noop "
+    "androidboot.hardware.hwcomposer.display_finder_mode=noop "
     "androidboot.hardware.egl=angle "
     "androidboot.hardware.vulkan=pastel "
     "androidboot.opengles.version=196608 "

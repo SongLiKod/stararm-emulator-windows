@@ -178,6 +178,19 @@ done
 # 实证（run 38325957483）：缺 init.stararm.rc → mount_all 从未执行 → /data 从未挂载 →
 # post-fs-data mkdir 全部 EROFS → apexd GetSessionsDir() CHECK 失败 SIGABRT → reboot,apexd-failed。
 cat > "$STAGING/init.stararm.rc" <<'EOF'
+# run 41e94a7 实证：双 ICD 注入后 EGL 错误全消失（ANGLE 拿到 swiftshader/pastel 设备），
+# SF 推进到 HWComposer 阶段；但 ranchu composer3 从未 hotplug → "HWC did not hotplug"。
+# 源码实证（LineageOS hwc3）：hwc3 读 ro.vendor.hwcomposer.{mode,display_finder_mode}，
+# 由 CF init_graphics.vendor.rc 从 ro.boot.hardware.hwcomposer.* 映射（本镜像缺该 rc）。
+# 属性为空 → GuestFrameComposer + goldfish finder（需宿主）→ 无显示器。
+# 即使补映射，mode=client 的 ClientFrameComposer::init 硬依赖 DrmClient，而
+# DrmClient::OpenVirtioGpuDrmFd 只认名字含 "virtio" 的 DRM（vkms 被拒）。
+# 定案：mode=noop + finder=noop → NoOpFrameComposer（零 DRM 依赖）+
+# findNoOpDisplays（720x1280 占位显示器）→ hotplug 发出 → SF 走 ANGLE GL 合成。
+on early-init
+    setprop ro.vendor.hwcomposer.mode ${ro.boot.hardware.hwcomposer.mode}
+    setprop ro.vendor.hwcomposer.display_finder_mode ${ro.boot.hardware.hwcomposer.display_finder_mode}
+
 on post-fs
     # run fd3746a 实证：mesa EGL 已能 eglGetDisplay/Initialize，但 chooseConfig 0 configs
     # （无 /dev/dri → android 平台 EGL 不提供 RECORDABLE/FRAMEBUFFER_TARGET 配置）。
