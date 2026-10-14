@@ -177,6 +177,46 @@ done
 # 设备专属 rc 执行（init.rc 注释原话："Mount fstab in init.{$device}.rc by mount_all command"）。
 # 实证（run 38325957483）：缺 init.stararm.rc → mount_all 从未执行 → /data 从未挂载 →
 # post-fs-data mkdir 全部 EROFS → apexd GetSessionsDir() CHECK 失败 SIGABRT → reboot,apexd-failed。
+# run 67733db/7a39c21 实证：nvme1 控制器探测成功（pci 0000:00:02.0 + queues +
+# "Ignoring bogus Namespace Identifiers"）但 nvme1n1 从不出现，且无任何 dev_err ——
+# 静默路径（nvme_alloc_ns 的 blk_mq_alloc_disk/init_ns_head/update_ns_info/
+# device_add_disk 全部失败无打印）无法从 dmesg 区分 → 串口探针 dump 客机内
+# /sys/class/nvme（subsysnqn/state/nn/cntlid）、/proc/partitions、PCI 拓扑，
+# 并触发 rescan_controller 复扫，作为下一轮修复的实证依据。
+cat > "$STAGING/system/bin/stararm-probe.sh" <<'EOF'
+#!/system/bin/sh
+echo ==NVME-CLASS==
+ls -l /sys/class/nvme/
+for d in /sys/class/nvme/nvme*; do
+  echo ==$d==
+  cat $d/model 2>/dev/null | sed 's/^/  model: /'
+  cat $d/serial 2>/dev/null | sed 's/^/  serial: /'
+  cat $d/state 2>/dev/null | sed 's/^/  state: /'
+  cat $d/subsysnqn 2>/dev/null | sed 's/^/  nqn: /'
+  cat $d/nn 2>/dev/null | sed 's/^/  nn: /'
+  cat $d/cntlid 2>/dev/null | sed 's/^/  cntlid: /'
+  ls $d 2>/dev/null | sed 's/^/  attrs: /'
+done
+echo ==DMESG-NVME==
+dmesg | grep -i nvme
+echo ==PARTITIONS==
+cat /proc/partitions
+echo ==DEV-NVME==
+ls -l /dev/nvme* /dev/block/nvme* 2>&1
+echo ==PCI==
+for p in /sys/bus/pci/devices/*; do
+  echo $p vendor=$(cat $p/vendor 2>/dev/null) device=$(cat $p/device 2>/dev/null)
+done
+echo ==RESCAN-NVME1==
+echo 1 > /sys/class/nvme/nvme1/rescan_controller 2>&1
+sleep 3
+cat /proc/partitions
+ls -l /dev/nvme* 2>&1
+dmesg | grep -i nvme
+echo ==ICD==
+ls -la /dev/dri /system/lib64/egl /vendor/lib64/egl /system/etc/vulkan/icd.d /vendor/etc/vulkan/icd.d /vendor/lib64/hw 2>&1
+EOF
+chmod 0755 "$STAGING/system/bin/stararm-probe.sh"
 cat > "$STAGING/init.stararm.rc" <<'EOF'
 # run 41e94a7 实证：双 ICD 注入后 EGL 错误全消失（ANGLE 拿到 swiftshader/pastel 设备），
 # SF 推进到 HWComposer 阶段；但 ranchu composer3 从未 hotplug → "HWC did not hotplug"。
@@ -202,9 +242,8 @@ on post-fs
     exec -- /system/bin/modprobe -d /vendor_dlkm/lib/modules vkms
 
 # 串口探针（fb6e4c8 实证：init exec sh 因 shell_exec 无 init 域转移而失败；
-# 改 service console + toybox（toolbox 域，与 modprobe 同域已验证可跑）→ 输出进 /dev/console）。
-# 目的：EGL/Vulkan ICD 文件真实清单（find 诊断曾截断）+ 未挂载 apex 文件排查。
-service stararm.probe /system/bin/toybox ls -la /dev/dri /system/lib64/egl /vendor/lib64/egl /system_ext/lib64/egl /product/lib64/egl /system/etc/vulkan/icd.d /vendor/etc/vulkan/icd.d /vendor/lib64/hw /system/apex /system_ext/apex /vendor/apex /product/apex
+# 改 service console（toolbox 域，与 modprobe 同域已验证可跑）→ 输出进 /dev/console）。
+service stararm.probe /system/bin/sh /system/bin/stararm-probe.sh
     class core
     user root
     group root
