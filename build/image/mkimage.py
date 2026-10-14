@@ -33,8 +33,15 @@ from pathlib import Path
 #  GuestFrameComposer 宿主路径）；且 mode=client 的 ClientFrameComposer 硬依赖
 #  DrmClient，DrmClient 只认 virtio-gpu（vkms 被拒）。定案 mode=noop + finder=noop：
 #  NoOpFrameComposer 零依赖 + 720x1280 占位显示器 → hotplug → SF ANGLE GL 合成。
+#  run 67733db 实证：SF 存活、system_server 已 fork 并写 permissions xml；但 /data 未
+#  挂载（mkdir /data/tombstones 报 Read-only、tombstoned crash-loop）——
+#  nvme1 控制器已探测（pci 0000:00:02.0）却无 nvme1n1：GKI
+#  CONFIG_BLK_DEV_NVME_MULTIPATH=y + 两块 QEMU 盘命名空间标识全同（bogus-quirk 后
+#  nsid 均=1、nguid/eui64/uuid 均=0）→ 第二块被判为第一块的 multipath 路径丢弃。
+#  修：nvme.multipath=0 关闭多路径去重 → nvme1n1 正常注册、fstab 可挂 /data。
 DEFAULT_CMDLINE = (
     "console=ttyAMA0,38400 root=/dev/nvme0n1 rootwait rw printk.devkmsg=on "
+    "nvme.multipath=0 "
     "androidboot.hardware=stararm "
     "androidboot.selinux=permissive androidboot.vbmeta.device_state=unlocked "
     "androidboot.verifiedbootstate=orange "
